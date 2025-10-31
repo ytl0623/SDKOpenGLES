@@ -28,7 +28,7 @@
  * in advertising or otherwise to promote the sale, use or other dealings in
  * this Software without prior written authorization from Xilinx.
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************************************************************/
 /**
  *
@@ -42,24 +42,24 @@
  * MODIFICATION HISTORY:
  *
  * Ver   Who            Date            Changes
- * ----- ----           --------        -----------------------------------------------
+ * ----- ----           -------- -----------------------------------------------
  * 1.0   Alok G         10/06/17        Initial release.
  * </pre>
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************* Header Files ********************************/
-
 
 #ifndef XGLSLCOMPILE_H
 #define XGLSLCOMPILE_H
 
 #include <GLES2/gl2.h>
 
-    class Shader
-    {
-    private:
-        static char *loadShader(const char *filename);
-    public:
-        static void processShader(GLuint *shader, const char *filename, GLint shaderType);
-    };
+class Shader {
+private:
+  static char *loadShader(const char *filename);
+
+public:
+  static void processShader(GLuint *shader, const char *filename,
+                            GLint shaderType);
+};
 #endif /* XGLSLCOMPILE_H */

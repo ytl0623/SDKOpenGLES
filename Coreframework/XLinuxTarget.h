@@ -28,13 +28,14 @@
  * in advertising or otherwise to promote the sale, use or other dealings in
  * this Software without prior written authorization from Xilinx.
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************************************************************/
 /**
  *
  * @file XLinuxTarget.h
  *
- * This file implements all the functions related to Linux XPodium class for application.
+ * This file implements all the functions related to Linux XPodium class for
+ *application.
  *
  * @note        None.
  *
@@ -42,32 +43,29 @@
  * MODIFICATION HISTORY:
  *
  * Ver   Who            Date            Changes
- * ----- ----           --------        -----------------------------------------------
+ * ----- ----           -------- -----------------------------------------------
  * 1.0   Alok G         10/06/17        Initial release.
  * </pre>
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************* Header Files ********************************/
-
-
 
 #ifndef XLINUXTARGET_H
 #define XLINUXTARGET_H
 
-#include <cstdlib>
 #include "XPodium.h"
 #include "Xfbdev_window.h"
+#include <cstdlib>
 
-    class XLinuxMali : public XPodium
-    {
-    private:
-        static XPodium* instance;
-       XLinuxMali(void);
-    public:
-        static XPodium* getHandler(void);
-        virtual void prepareWindow(int width, int height);
-        virtual void destroyWindow(void);
-        virtual WindowStatus checkWindow(void);
-    };
+class XLinuxMali : public XPodium {
+private:
+  static XPodium *instance;
+  XLinuxMali(void);
+
+public:
+  static XPodium *getHandler(void);
+  virtual void prepareWindow(int width, int height);
+  virtual void destroyWindow(void);
+  virtual WindowStatus checkWindow(void);
+};
 #endif /* XLINUXTARGET_H */
-

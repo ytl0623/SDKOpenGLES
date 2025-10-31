@@ -28,13 +28,14 @@
  * in advertising or otherwise to promote the sale, use or other dealings in
  * this Software without prior written authorization from Xilinx.
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************************************************************/
 /**
  *
  * @file XLinuxPodium.h
  *
- * This file implements all the functions related to Linux X11 windowing system API's for application.
+ * This file implements all the functions related to Linux X11 windowing system
+ *API's for application.
  *
  * @note        None.
  *
@@ -42,39 +43,37 @@
  * MODIFICATION HISTORY:
  *
  * Ver   Who            Date            Changes
- * ----- ----           --------        -----------------------------------------------
+ * ----- ----           -------- -----------------------------------------------
  * 1.0   Alok G         10/06/17        Initial release.
  * </pre>
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************* Source Files ********************************/
-
-
 
 #ifndef XLINUXPODIUM_H
 #define XLINUXPODIUM_H
 
-#include <cstdlib>
 #include <EGL/egl.h>
+#include <cstdlib>
 
 #include "XPodium.h"
 
-    class XLinuxPodium : public XPodium
-    {
-    private:
+class XLinuxPodium : public XPodium {
+private:
+  int windowWidth;
+  int windowHeight;
+  Colormap colormap;
+  XVisualInfo *visual;
+  static XPodium *instance;
+  XLinuxPodium(void);
+  static Bool wait_for_map(Display *display, XEvent *event,
+                           char *windowPointer);
 
-        int windowWidth;
-        int windowHeight;
-        Colormap colormap;
-        XVisualInfo *visual;
-        static XPodium* instance;
-        XLinuxPodium(void);
-        static Bool wait_for_map(Display *display, XEvent *event, char *windowPointer);
-    public:
-        static XPodium* getHandler(void);
-        virtual void prepareWindow(int width, int height);
-        virtual void destroyWindow(void);
-        virtual WindowStatus checkWindow(void);
-        bool createX11Window(void); 
-    };
+public:
+  static XPodium *getHandler(void);
+  virtual void prepareWindow(int width, int height);
+  virtual void destroyWindow(void);
+  virtual WindowStatus checkWindow(void);
+  bool createX11Window(void);
+};
 #endif /* XLINUXPODIUM_H */

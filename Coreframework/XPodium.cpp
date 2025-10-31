@@ -28,7 +28,7 @@
  * in advertising or otherwise to promote the sale, use or other dealings in
  * this Software without prior written authorization from Xilinx.
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************************************************************/
 /**
  *
@@ -42,28 +42,24 @@
  * MODIFICATION HISTORY:
  *
  * Ver   Who            Date            Changes
- * ----- ----           --------        -----------------------------------------------
+ * ----- ----           -------- -----------------------------------------------
  * 1.0   Alok G         10/06/17        Initial release.
  * </pre>
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************* Source Files ********************************/
-
 
 #include "XPodium.h"
 
-#include <cstdio>
 #include <cstdarg>
+#include <cstdio>
 
-    XPodium* XPodium::getHandler()
-    {
-    #ifdef ENABLE_FBDEV
-       		 return XLinuxMali::getHandler();
-    #endif
+XPodium *XPodium::getHandler() {
+#ifdef ENABLE_FBDEV
+  return XLinuxMali::getHandler();
+#endif
 
-    #ifdef ENABLE_X11
-                 return XLinuxPodium::getHandler();
-    #endif
-    }
-
-
+#ifdef ENABLE_X11
+  return XLinuxPodium::getHandler();
+#endif
+}

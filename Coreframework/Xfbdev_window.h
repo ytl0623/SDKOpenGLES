@@ -28,7 +28,7 @@
  * in advertising or otherwise to promote the sale, use or other dealings in
  * this Software without prior written authorization from Xilinx.
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************************************************************/
 /**
  *
@@ -42,13 +42,12 @@
  * MODIFICATION HISTORY:
  *
  * Ver   Who            Date            Changes
- * ----- ----           --------        -----------------------------------------------
+ * ----- ----           -------- -----------------------------------------------
  * 1.0   Alok G         10/06/17        Initial release.
  * </pre>
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************* Header Files ********************************/
-
 
 #ifndef _FBDEV_WINDOW_H_
 #define _FBDEV_WINDOW_H_
@@ -57,16 +56,13 @@
 extern "C" {
 #endif
 
-typedef struct fbdev_window
-{
-	unsigned short width;
-	unsigned short height;
+typedef struct fbdev_window {
+  unsigned short width;
+  unsigned short height;
 } fbdev_window;
-
 
 #ifdef __cplusplus
 }
 #endif
- 
 
 #endif

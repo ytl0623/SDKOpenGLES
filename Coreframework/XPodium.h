@@ -42,39 +42,34 @@
  * MODIFICATION HISTORY:
  *
  * Ver   Who            Date            Changes
- * ----- ----           --------        -----------------------------------------------
+ * ----- ----           -------- -----------------------------------------------
  * 1.0   Alok G         10/06/17        Initial release.
  * </pre>
  *
  *******************************************************************************/
 /******************************* Header Files ********************************/
 
-
 #ifndef XPodium_H
 #define XPodium_H
 
-#include "XEGLIntf.h"
 #include "XCVector.h"
-#include <cstdio>
+#include "XEGLIntf.h"
 #include "Xfbdev_window.h"
+#include <cstdio>
 
-	class XPodium
-	{
-		public:
-			enum WindowStatus {
-				WINDOW_IDLE, 
-				WINDOW_EXIT, 
-				WINDOW_CLICK};
-			CVec2 mouseClick;
-			fbdev_window *Fwindow;
-			Window window;
-			Display* display;
-			virtual void prepareWindow(int width, int height) = 0;
-			virtual WindowStatus checkWindow(void) = 0;
-			virtual void destroyWindow(void) = 0;
-			static void log(const char* format, ...);
-			static XPodium* getHandler();
-	};
+class XPodium {
+public:
+  enum WindowStatus { WINDOW_IDLE, WINDOW_EXIT, WINDOW_CLICK };
+  CVec2 mouseClick;
+  fbdev_window *Fwindow;
+  Window window;
+  Display *display;
+  virtual void prepareWindow(int width, int height) = 0;
+  virtual WindowStatus checkWindow(void) = 0;
+  virtual void destroyWindow(void) = 0;
+  static void log(const char *format, ...);
+  static XPodium *getHandler();
+};
 
 #ifdef ENABLE_FBDEV
 #include "XLinuxTarget.h"
@@ -83,6 +78,5 @@
 #ifdef ENABLE_X11
 #include "XLinuxPodium.h"
 #endif
-
 
 #endif /* XPodium_H */

@@ -28,13 +28,14 @@
  * in advertising or otherwise to promote the sale, use or other dealings in
  * this Software without prior written authorization from Xilinx.
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************************************************************/
 /**
  *
  * @file XTexture.h
  *
- * This file implements all the functions related to texture compression techniques.
+ * This file implements all the functions related to texture compression
+ *techniques.
  *
  * @note        None.
  *
@@ -42,14 +43,12 @@
  * MODIFICATION HISTORY:
  *
  * Ver   Who            Date            Changes
- * ----- ----           --------        -----------------------------------------------
+ * ----- ----           -------- -----------------------------------------------
  * 1.0   Alok G         10/06/17        Initial release.
  * </pre>
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************* Header Files ********************************/
-
-
 
 #ifndef XTEXTURE_H
 #define XTEXTURE_H
@@ -58,19 +57,27 @@
 
 #include <GLES2/gl2.h>
 
-    class XTexture
-    {
-    private:
-        static void XgetCompressedTextureFormats(GLint **textureFormats, int* numberOfTextureFormats);
-    public:
-        static bool XisETCSupported(bool verbose = false);
-   	static void XcreateTexture(unsigned int width, unsigned int height, GLvoid **textureData);
-	static void XcreateTexture(unsigned int width, unsigned int height, unsigned int red, GLvoid **textureData);
-        static void XcreateTexture(unsigned int width, unsigned int height, short red, short **textureData);
-        static void XdeleteTextureData(GLvoid **textureData);
-        static void XloadData(const char *filename, unsigned char **textureData);
-        static void XloadPKMData(const char *filename, ETCHeaderforTexture* etcHeader, unsigned char **textureData);
-        static void XloadCompressedMipmaps(const char *filenameBase, const char *filenameSuffix, GLuint *textureID);
-        static void XreversePixelLine(float* destination, const float* source, int lineWidth);
-    };
+class XTexture {
+private:
+  static void XgetCompressedTextureFormats(GLint **textureFormats,
+                                           int *numberOfTextureFormats);
+
+public:
+  static bool XisETCSupported(bool verbose = false);
+  static void XcreateTexture(unsigned int width, unsigned int height,
+                             GLvoid **textureData);
+  static void XcreateTexture(unsigned int width, unsigned int height,
+                             unsigned int red, GLvoid **textureData);
+  static void XcreateTexture(unsigned int width, unsigned int height, short red,
+                             short **textureData);
+  static void XdeleteTextureData(GLvoid **textureData);
+  static void XloadData(const char *filename, unsigned char **textureData);
+  static void XloadPKMData(const char *filename, ETCHeaderforTexture *etcHeader,
+                           unsigned char **textureData);
+  static void XloadCompressedMipmaps(const char *filenameBase,
+                                     const char *filenameSuffix,
+                                     GLuint *textureID);
+  static void XreversePixelLine(float *destination, const float *source,
+                                int lineWidth);
+};
 #endif /* TEXTURE_H */

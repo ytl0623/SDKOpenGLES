@@ -28,13 +28,14 @@
  * in advertising or otherwise to promote the sale, use or other dealings in
  * this Software without prior written authorization from Xilinx.
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************************************************************/
 /**
  *
  * @file XLinuxMali.cpp
  *
- * This file implements all the functions related to Linux XPodium class for application.
+ * This file implements all the functions related to Linux XPodium class for
+ *application.
  *
  * @note        None.
  *
@@ -42,14 +43,12 @@
  * MODIFICATION HISTORY:
  *
  * Ver   Who            Date            Changes
- * ----- ----           --------        -----------------------------------------------
+ * ----- ----           -------- -----------------------------------------------
  * 1.0   Alok G         10/06/17        Initial release.
  * </pre>
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************* Source Files ********************************/
-
-
 
 #include <cstdlib>
 #include <sys/fcntl.h>
@@ -57,40 +56,29 @@
 
 #include "XLinuxTarget.h"
 
-    XPodium* XLinuxMali::instance = NULL;
+XPodium *XLinuxMali::instance = NULL;
 
-    XLinuxMali::XLinuxMali(void)
-    {
+XLinuxMali::XLinuxMali(void) {}
 
-    }
+XPodium *XLinuxMali::getHandler(void) {
+  if (instance == NULL) {
+    instance = new XLinuxMali();
+  }
+  return instance;
+}
 
-    XPodium* XLinuxMali::getHandler(void)
-    {
-        if (instance == NULL)
-        {
-            instance = new XLinuxMali();
-        }
-        return instance;
-    }
+void XLinuxMali::prepareWindow(int width, int height) {
+  Fwindow = (fbdev_window *)calloc(1, sizeof(fbdev_window));
+  if (Fwindow == NULL) {
+    printf("Out of memory at %s:%i\n", __FILE__, __LINE__);
+    exit(1);
+  }
+  Fwindow->width = width;
+  Fwindow->height = height;
+}
 
-    void XLinuxMali::prepareWindow(int width, int height)
-    {
-        Fwindow = (fbdev_window *)calloc(1, sizeof(fbdev_window));
-        if(Fwindow == NULL)
-        {
-            printf("Out of memory at %s:%i\n", __FILE__, __LINE__);
-            exit(1);
-        }
-        Fwindow->width = width;
-        Fwindow->height = height;
-    }
+void XLinuxMali::destroyWindow(void) { free(Fwindow); }
 
-    void XLinuxMali::destroyWindow(void)
-    {
-        free(Fwindow);
-    }
-
-    XPodium::WindowStatus XLinuxMali::checkWindow(void)
-    {
-        return XPodium::WINDOW_IDLE;
-    }
+XPodium::WindowStatus XLinuxMali::checkWindow(void) {
+  return XPodium::WINDOW_IDLE;
+}

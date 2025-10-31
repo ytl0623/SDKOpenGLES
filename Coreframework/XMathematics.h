@@ -28,7 +28,7 @@
  * in advertising or otherwise to promote the sale, use or other dealings in
  * this Software without prior written authorization from Xilinx.
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************************************************************/
 /**
  *
@@ -42,14 +42,13 @@
  * MODIFICATION HISTORY:
  *
  * Ver   Who  		Date     	Changes
- * ----- ---- 		-------- 	-----------------------------------------------
- * 1.0   Alok G  	10/06/17 	Initial release.
+ * ----- ---- 		--------
+ *----------------------------------------------- 1.0   Alok G  	10/06/17
+ *Initial release.
  * </pre>
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************* Header Files ********************************/
-
-
 
 #ifndef XMATHOPERATIONS_H
 #define XMATHOPERATIONS_H
@@ -59,36 +58,26 @@
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
-#endif 
+#endif
 
-    inline float distanceBetweenPoints(const CVec2f& point1, const CVec2f& point2)
-    {
-	    return sqrtf((point2.x - point1.x) * (point2.x - point1.x) + (point2.y - point1.y) * (point2.y - point1.y));
-    }
+inline float distanceBetweenPoints(const CVec2f &point1, const CVec2f &point2) {
+  return sqrtf((point2.x - point1.x) * (point2.x - point1.x) +
+               (point2.y - point1.y) * (point2.y - point1.y));
+}
 
-  
-    inline float degreesToRadians(float degrees)
-    {
-        return M_PI * degrees / 180.0f;
-    }
+inline float degreesToRadians(float degrees) { return M_PI * degrees / 180.0f; }
 
-    inline float signum(float f)
-    {
-	    if (f > 0.0f) 
-	    {
-		    return  1.0f;
-	    }
-        
-	    if (f < 0.0f) 
-	    {
-		    return -1.0f;
-	    }
+inline float signum(float f) {
+  if (f > 0.0f) {
+    return 1.0f;
+  }
 
-	    return 0.0f;
-    }
+  if (f < 0.0f) {
+    return -1.0f;
+  }
 
-    inline float uniformRandomNumber()
-    {
-	    return rand() / float(RAND_MAX);
-    }
+  return 0.0f;
+}
+
+inline float uniformRandomNumber() { return rand() / float(RAND_MAX); }
 #endif /* MATHOPERATIONS_H */

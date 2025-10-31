@@ -28,13 +28,14 @@
  * in advertising or otherwise to promote the sale, use or other dealings in
  * this Software without prior written authorization from Xilinx.
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************************************************************/
 /**
  *
  * @file XMatrixAPI.h
  *
- * This file implements all the functions related to Matrix calculations for application.
+ * This file implements all the functions related to Matrix calculations for
+ *application.
  *
  * @note        None.
  *
@@ -42,50 +43,52 @@
  * MODIFICATION HISTORY:
  *
  * Ver   Who            Date            Changes
- * ----- ----           --------        -----------------------------------------------
+ * ----- ----           -------- -----------------------------------------------
  * 1.0   Alok G         10/06/17        Initial release.
  * </pre>
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************* Header Files ********************************/
 
 #ifndef MATRIX_H
 #define MATRIX_H
 
-
 #include "XCVector.h"
 
-class XMatrixAPI
-    {
-    private: 
-        float elements[16];
-        static XMatrixAPI multiply(XMatrixAPI *left, XMatrixAPI *right);
-        static const float identityArray[];
-    public:       
-        float* getAsArray(void);
-   	XMatrixAPI(void);
-        float& operator[] (unsigned element);
-        XMatrixAPI operator* (XMatrixAPI right);
-        XMatrixAPI& operator=(const XMatrixAPI &another);
-        XMatrixAPI(const float* array);
-        static XMatrixAPI identityXMatrixAPI;
-        static CVec4f vertexTransform(CVec4f *vector, XMatrixAPI *XMatrixAPI);
-        static CVec3f vertexTransform(CVec3f *vector, XMatrixAPI *XMatrixAPI);
-        static void XMatrixAPITranspose(XMatrixAPI *XMatrixAPI);
-        static XMatrixAPI createRotationX(float angle);
-        static XMatrixAPI createRotationY(float angle);
-        static XMatrixAPI createRotationZ(float angle);
-        static XMatrixAPI createTranslation(float x, float y, float z);
-        static XMatrixAPI createScaling(float x, float y, float z);
-        void print(void);
-        static XMatrixAPI XMatrixAPIPerspective(float FOV, float ratio, float zNear, float zFar);
-	static XMatrixAPI XMatrixAPICameraLookAt(CVec3f eye, CVec3f center, CVec3f up); 
-        static XMatrixAPI XMatrixAPIOrthographic(float left, float right, float bottom, float top, float zNear, float zFar);
-        static XMatrixAPI XMatrixAPIInvert(XMatrixAPI *XMatrixAPI);
-        static float XMatrixAPIDeterminant(float *XMatrixAPI);
-        static float XMatrixAPIDeterminant(XMatrixAPI *XMatrixAPI);
-        static XMatrixAPI XMatrixAPIScale(XMatrixAPI *XMatrixAPI, float scale);
-   	
-     };
+class XMatrixAPI {
+private:
+  float elements[16];
+  static XMatrixAPI multiply(XMatrixAPI *left, XMatrixAPI *right);
+  static const float identityArray[];
+
+public:
+  float *getAsArray(void);
+  XMatrixAPI(void);
+  float &operator[](unsigned element);
+  XMatrixAPI operator*(XMatrixAPI right);
+  XMatrixAPI &operator=(const XMatrixAPI &another);
+  XMatrixAPI(const float *array);
+  static XMatrixAPI identityXMatrixAPI;
+  static CVec4f vertexTransform(CVec4f *vector, XMatrixAPI *XMatrixAPI);
+  static CVec3f vertexTransform(CVec3f *vector, XMatrixAPI *XMatrixAPI);
+  static void XMatrixAPITranspose(XMatrixAPI *XMatrixAPI);
+  static XMatrixAPI createRotationX(float angle);
+  static XMatrixAPI createRotationY(float angle);
+  static XMatrixAPI createRotationZ(float angle);
+  static XMatrixAPI createTranslation(float x, float y, float z);
+  static XMatrixAPI createScaling(float x, float y, float z);
+  void print(void);
+  static XMatrixAPI XMatrixAPIPerspective(float FOV, float ratio, float zNear,
+                                          float zFar);
+  static XMatrixAPI XMatrixAPICameraLookAt(CVec3f eye, CVec3f center,
+                                           CVec3f up);
+  static XMatrixAPI XMatrixAPIOrthographic(float left, float right,
+                                           float bottom, float top, float zNear,
+                                           float zFar);
+  static XMatrixAPI XMatrixAPIInvert(XMatrixAPI *XMatrixAPI);
+  static float XMatrixAPIDeterminant(float *XMatrixAPI);
+  static float XMatrixAPIDeterminant(XMatrixAPI *XMatrixAPI);
+  static XMatrixAPI XMatrixAPIScale(XMatrixAPI *XMatrixAPI, float scale);
+};
 
 #endif

@@ -28,7 +28,7 @@
  * in advertising or otherwise to promote the sale, use or other dealings in
  * this Software without prior written authorization from Xilinx.
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************************************************************/
 /**
  *
@@ -42,57 +42,45 @@
  * MODIFICATION HISTORY:
  *
  * Ver   Who            Date            Changes
- * ----- ----           --------        -----------------------------------------------
+ * ----- ----           -------- -----------------------------------------------
  * 1.0   Alok G         10/06/17        Initial release.
  * </pre>
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************* Source Files ********************************/
-
 
 #include "XCompressionTexture.h"
 
+unsigned short ETCHeaderforTexture::getWidth(void) {
+  return (widthMSB << 8) | widthLSB;
+}
 
-    unsigned short ETCHeaderforTexture::getWidth(void)
-    {
-        return (widthMSB << 8) | widthLSB;
-    }
+unsigned short ETCHeaderforTexture::getHeight(void) {
+  return (heightMSB << 8) | heightLSB;
+}
 
-    unsigned short ETCHeaderforTexture::getHeight(void)
-    {
-        return (heightMSB << 8) | heightLSB;
-    }
+unsigned short ETCHeaderforTexture::getPaddedWidth(void) {
+  return (paddedWidthMSB << 8) | paddedWidthLSB;
+}
 
-    unsigned short ETCHeaderforTexture::getPaddedWidth(void)
-    {
-        return (paddedWidthMSB << 8) | paddedWidthLSB;
-    }
+unsigned short ETCHeaderforTexture::getPaddedHeight(void) {
+  return (paddedHeightMSB << 8) | paddedHeightLSB;
+}
 
-    unsigned short ETCHeaderforTexture::getPaddedHeight(void)
-    {
-        return (paddedHeightMSB << 8) | paddedHeightLSB;
-    }
+GLsizei ETCHeaderforTexture::getSize(GLenum internalFormat) {
+  return (getPaddedWidth() * getPaddedHeight());
+}
 
-    GLsizei ETCHeaderforTexture::getSize(GLenum internalFormat)
-    {
-        return (getPaddedWidth() * getPaddedHeight());
-    }
+ETCHeaderforTexture::ETCHeaderforTexture() {}
 
+ETCHeaderforTexture::ETCHeaderforTexture(unsigned char *data) {
 
-    ETCHeaderforTexture::ETCHeaderforTexture()
-    {
-    
-    }
-
-    ETCHeaderforTexture::ETCHeaderforTexture(unsigned char *data)
-    {
-  
-        paddedWidthMSB = data[8];
-        paddedWidthLSB = data[9];
-        paddedHeightMSB = data[10];
-        paddedHeightLSB = data[11];
-        widthMSB = data[12];
-        widthLSB = data[13];
-        heightMSB = data[14];
-        heightLSB = data[15];
-    }
+  paddedWidthMSB = data[8];
+  paddedWidthLSB = data[9];
+  paddedHeightMSB = data[10];
+  paddedHeightLSB = data[11];
+  widthMSB = data[12];
+  widthLSB = data[13];
+  heightMSB = data[14];
+  heightLSB = data[15];
+}

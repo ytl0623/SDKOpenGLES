@@ -28,7 +28,7 @@
  * in advertising or otherwise to promote the sale, use or other dealings in
  * this Software without prior written authorization from Xilinx.
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************************************************************/
 /**
  *
@@ -42,38 +42,36 @@
  * MODIFICATION HISTORY:
  *
  * Ver   Who            Date            Changes
- * ----- ----           --------        -----------------------------------------------
+ * ----- ----           -------- -----------------------------------------------
  * 1.0   Alok G         10/06/17        Initial release.
  * </pre>
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************* Header Files ********************************/
- 
-
 
 #ifndef XCOMPRESSIONTEXTURE_H
 #define XCOMPRESSIONTEXTURE_H
 
 #include <GLES2/gl2.h>
 
-    class ETCHeaderforTexture
-    {
-    private:
-        unsigned char paddedWidthMSB;
-        unsigned char paddedWidthLSB;
-        unsigned char paddedHeightMSB;
-        unsigned char paddedHeightLSB;
-        unsigned char widthMSB;
-        unsigned char widthLSB;
-        unsigned char heightMSB;
-        unsigned char heightLSB;
-    public:
-        ETCHeaderforTexture();
-        ETCHeaderforTexture(unsigned char *data);
-        unsigned short getWidth(void);
-    	unsigned short getHeight(void);
-	unsigned short getPaddedWidth(void);
-	unsigned short getPaddedHeight(void);
-	GLsizei getSize(GLenum internalFormat);
-    };
+class ETCHeaderforTexture {
+private:
+  unsigned char paddedWidthMSB;
+  unsigned char paddedWidthLSB;
+  unsigned char paddedHeightMSB;
+  unsigned char paddedHeightLSB;
+  unsigned char widthMSB;
+  unsigned char widthLSB;
+  unsigned char heightMSB;
+  unsigned char heightLSB;
+
+public:
+  ETCHeaderforTexture();
+  ETCHeaderforTexture(unsigned char *data);
+  unsigned short getWidth(void);
+  unsigned short getHeight(void);
+  unsigned short getPaddedWidth(void);
+  unsigned short getPaddedHeight(void);
+  GLsizei getSize(GLenum internalFormat);
+};
 #endif /* XCOMPRESSIONTEXTURE_H */

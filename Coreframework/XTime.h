@@ -28,7 +28,7 @@
  * in advertising or otherwise to promote the sale, use or other dealings in
  * this Software without prior written authorization from Xilinx.
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************************************************************/
 /**
  *
@@ -42,14 +42,12 @@
  * MODIFICATION HISTORY:
  *
  * Ver   Who            Date            Changes
- * ----- ----           --------        -----------------------------------------------
+ * ----- ----           -------- -----------------------------------------------
  * 1.0   Alok G         10/06/17        Initial release.
  * </pre>
  *
-*******************************************************************************/
+ *******************************************************************************/
 /******************************* Source Files ********************************/
-
-
 
 #ifndef TIMER_H
 #define TIMER_H
@@ -61,26 +59,25 @@
 #include <sys/time.h>
 #endif
 
-namespace SDKXilinx
-{
+namespace SDKXilinx {
 
-    class Timer
-    {
-    private:
-        int frameCount;
-        float fps;
-        float lastTime;
-        timeval startTime;
-        timeval currentTime;
-        float lastIntervalTime;
-        float fpsTime;
-    public:
-        Timer();
-        void reset();
-        float getTime();
-        float getInterval();
-        float getFPS();
-        bool isTimePassed(float seconds = 1.0f);
-    };
+class Timer {
+private:
+  int frameCount;
+  float fps;
+  float lastTime;
+  timeval startTime;
+  timeval currentTime;
+  float lastIntervalTime;
+  float fpsTime;
+
+public:
+  Timer();
+  void reset();
+  float getTime();
+  float getInterval();
+  float getFPS();
+  bool isTimePassed(float seconds = 1.0f);
+};
 #endif /* TIMER_H */
 }
