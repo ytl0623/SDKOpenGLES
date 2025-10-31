@@ -1,23 +1,30 @@
 name: Build Project
 
 on:
-  # 觸發工作流程的事件：推送到任何分支
   push:
 
 jobs:
   build:
-    # 指定運行的虛擬機環境
     runs-on: ubuntu-latest
 
+    env:
+      MALI_LIBS: /usr/lib
+      MALI_INCLUDE: /usr/include
+      ARM_CROSS_COMPILER_PATH: /usr/bin/aarch64-linux-gnu-g++
+      ARM_CROSS_COMPILER_PATH_C: /usr/bin/aarch64-linux-gnu-gcc
+      CXXFLAGS: -DENABLE_X11
+
     steps:
-      # 這樣工作流程才能存取你的 Makefile 和原始碼
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setting 
-        run: source run_exports.sh
+      # 
+      # 新增步驟：安裝 ARM 跨編譯器
+      #
+      - name: Install ARM Cross-Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
-
-      # 這會在 'make clean' 完成後執行
       - name: Run make
         run: make
