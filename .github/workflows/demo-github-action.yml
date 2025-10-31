@@ -8,8 +8,13 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      MALI_LIBS: /usr/lib
-      MALI_INCLUDE: /usr/include
+      # 
+      # 修正 1：
+      # 更新路徑以指向 aarch64 的 multiarch 標準路徑
+      # 
+      MALI_LIBS: /usr/lib/aarch64-linux-gnu
+      MALI_INCLUDE: /usr/include/aarch64-linux-gnu
+      
       ARM_CROSS_COMPILER_PATH: /usr/bin/aarch64-linux-gnu-g++
       ARM_CROSS_COMPILER_PATH_C: /usr/bin/aarch64-linux-gnu-gcc
       CXXFLAGS: -DENABLE_X11
@@ -19,12 +24,24 @@ jobs:
         uses: actions/checkout@v4
 
       # 
-      # 新增步驟：安裝 ARM 跨編譯器
+      # 修正 2：
+      # 安裝 GLES 和 EGL 的 'arm64' 版本
       #
-      - name: Install ARM Cross-Compiler
+      - name: Install Dependencies (Cross-Compiler & Libs)
         run: |
+          # 啟用 arm64 架構 (multiarch)
+          sudo dpkg --add-architecture arm64
+          
+          # 更新 apt 套件列表 (納入 arm64 套件)
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          
+          # 安裝所有需要的套件
+          # 包含：arm64 編譯器 和 arm64 開發函式庫
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            libgles2-mesa-dev:arm64 \
+            libegl1-mesa-dev:arm64
 
       - name: Run make
         run: make
