@@ -7,8 +7,8 @@ git clone https://github.com/Xilinx/SDKOpenGLES/tree/master
 <br />
 
 2. Edit the run_exports.sh and change appropriate path for cross-compiler & libs.<br />
-3. Keep this flag enabled CXXFLAGS=-DENABLE_FBDEV , If you are compiling for FBDEV & for x11 disable this flag and set it to CXXFLAGS=-DENABLE_X11 instead.<br />
-4. Source the modified file run_exports.sh
+3. Keep this flag enabled `CXXFLAGS=-DENABLE_FBDEV`, If you are compiling for FBDEV & for x11 disable this flag and set it to `CXXFLAGS=-DENABLE_X11 instead`.<br />
+4. Source the modified file run_exports.sh.
 
 ```bash
 source ./run_exports.sh
@@ -22,7 +22,7 @@ make all
 ```
 <br />
 
-6. Run. Respective binaries should be compiled for each sample & then you can run them. E.g: 
+6. Run. Respective binaries should be compiled for each sample & then you can run them. E.g.,:
 
 ```bash
 cd MultiCubeSample && ./MultiCubeSample
@@ -44,7 +44,7 @@ effects. This is available in both versions X11 and FBDEV.
 
 
 # Depth Buffer Sample GPU
-This sample is designed to use depth buffer and create an effect on GPU . It draws cube and vertical plane with overlapping depth.Animation is created using matrices which allows the objects to rotate.
+This sample is designed to use depth buffer and create an effect on GPU. It draws cube and vertical plane with overlapping depth.Animation is created using matrices which allows the objects to rotate.
 This is available in both versions X11 and FBDEV.
 
 ![alt text](https://github.com/Xilinx/SDKOpenGLES/blob/master/Alpha_DepthSample/Depth.png)
