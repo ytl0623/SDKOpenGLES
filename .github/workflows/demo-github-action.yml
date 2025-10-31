@@ -16,10 +16,7 @@ jobs:
 
       - name: Setting 
         run: source run_exports.sh
-      
-      # 'run' 關鍵字用來執行 shell 命令
-      - name: Run make clean
-        run: make clean
+
 
       # 這會在 'make clean' 完成後執行
       - name: Run make
