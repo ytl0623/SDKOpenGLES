@@ -1,7 +1,8 @@
-export MALI_LIBS=<Path to>/sysroots/plnx_aarch64/usr/lib
-export MALI_INCLUDE=/scratch/ZCU102_PL/ZynqMP/build/tmp/sysroots/plnx_aarch64/usr/include
-export ARM_CROSS_COMPILER_PATH=/proj/petalinux/petalinux-v2023.1_daily_latest/petalinux-v2023.1-final/tools/linux-i386/aarch64-linux-gnu/bin/aarch64-linux-gnu-g++
-export ARM_CROSS_COMPILER_PATH_C=/proj/petalinux/petalinux-v2023.1_daily_latest/petalinux-v2023.1-final/tools/linux-i386/aarch64-linux-gnu/bin/aarch64-linux-gnu-gcc
-export CXXFLAGS=-DENABLE_FBDEV
+export MALI_LIBS=/usr/lib
+export MALI_INCLUDE=/usr/include
+export ARM_CROSS_COMPILER_PATH=/usr/bin/aarch64-linux-gnu-g++
+export ARM_CROSS_COMPILER_PATH_C=/usr/bin/aarch64-linux-gnu-gcc
 
+# export CXXFLAGS=-DENABLE_FBDEV
+export CXXFLAGS=-DENABLE_X11
 
