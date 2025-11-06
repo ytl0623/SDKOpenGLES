@@ -7,8 +7,13 @@ git clone https://github.com/Xilinx/SDKOpenGLES/tree/master
 <br />
 
 2. Edit the run_exports.sh and change appropriate path for cross-compiler & libs.<br />
+<<<<<<< HEAD
 3. Keep this flag enabled `CXXFLAGS=-DENABLE_FBDEV`, If you are compiling for FBDEV & for x11 disable this flag and set it to `CXXFLAGS=-DENABLE_X11 instead`.<br />
 4. Source the modified file run_exports.sh.
+=======
+3. Keep this flag enabled CXXFLAGS=-DENABLE_FBDEV, If you are compiling for FBDEV & for x11 disable this flag and set it to CXXFLAGS=-DENABLE_X11 instead.<br />
+4. Source the modified file run_exports.sh
+>>>>>>> fix-issue-10
 
 ```bash
 source ./run_exports.sh
