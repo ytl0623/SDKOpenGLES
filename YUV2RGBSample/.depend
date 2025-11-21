@@ -1,0 +1,30 @@
+XGLSLCompile.o: ../Coreframework/XGLSLCompile.cpp \
+ ../Coreframework/XGLSLCompile.h ../Coreframework/XPodium.h \
+ ../Coreframework/XEGLIntf.h ../Coreframework/XCVector.h \
+ ../Coreframework/Xfbdev_window.h ../Coreframework/XLinuxPodium.h
+XEGLIntf.o: ../Coreframework/XEGLIntf.cpp ../Coreframework/XEGLIntf.h \
+ ../Coreframework/XPodium.h ../Coreframework/XCVector.h \
+ ../Coreframework/Xfbdev_window.h ../Coreframework/XLinuxPodium.h
+XMatrixAPI.o: ../Coreframework/XMatrixAPI.cpp \
+ ../Coreframework/XMatrixAPI.h ../Coreframework/XCVector.h \
+ ../Coreframework/XMathematics.h ../Coreframework/XPodium.h \
+ ../Coreframework/XEGLIntf.h ../Coreframework/Xfbdev_window.h \
+ ../Coreframework/XLinuxPodium.h
+XPodium.o: ../Coreframework/XPodium.cpp ../Coreframework/XPodium.h \
+ ../Coreframework/XEGLIntf.h ../Coreframework/XCVector.h \
+ ../Coreframework/Xfbdev_window.h ../Coreframework/XLinuxPodium.h
+XLinuxPodium.o: ../Coreframework/XLinuxPodium.cpp \
+ ../Coreframework/XLinuxPodium.h ../Coreframework/XPodium.h \
+ ../Coreframework/XEGLIntf.h ../Coreframework/XCVector.h \
+ ../Coreframework/Xfbdev_window.h
+XTime.o: ../Coreframework/XTime.cpp ../Coreframework/XTime.h
+XLinuxTarget.o: ../Coreframework/XLinuxTarget.cpp \
+ ../Coreframework/XLinuxTarget.h ../Coreframework/XPodium.h \
+ ../Coreframework/XEGLIntf.h ../Coreframework/XCVector.h \
+ ../Coreframework/Xfbdev_window.h ../Coreframework/XLinuxPodium.h
+XCompressionTexture.o: ../Coreframework/XCompressionTexture.cpp \
+ ../Coreframework/XCompressionTexture.h
+XTexture.o: ../Coreframework/XTexture.cpp ../Coreframework/XTexture.h \
+ ../Coreframework/XCompressionTexture.h ../Coreframework/XPodium.h \
+ ../Coreframework/XEGLIntf.h ../Coreframework/XCVector.h \
+ ../Coreframework/Xfbdev_window.h ../Coreframework/XLinuxPodium.h
