@@ -817,7 +817,7 @@
 // )";
 
 // const char* fragmentShaderSource = R"(
-// precision mediump float;
+// precision lowp float;
 // varying vec2 vTexCoord;
 // uniform sampler2D uInputTexture;
 // uniform sampler2D uControlPoint0;
@@ -1249,7 +1249,7 @@ void main() {
 
 // 新的 Fragment Shader: YUV -> RGB 轉換 + Demura
 const char* fragmentShaderSource = R"(
-precision mediump float;
+precision lowp float;
 varying vec2 vTexCoord;
 
 // 輸入改為 3 個紋理

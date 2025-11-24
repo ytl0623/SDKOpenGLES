@@ -116,6 +116,12 @@
         sizeHints.y = 10;
 
         XSetStandardProperties(display, window, "Xilinx OpenGL ES SDK", "", None, 0, 0, &sizeHints);
+        
+        Atom wm_state = XInternAtom(display, "_NET_WM_STATE", False);
+        Atom fullscreen = XInternAtom(display, "_NET_WM_STATE_FULLSCREEN", False);
+        XChangeProperty(display, window, wm_state, XA_ATOM, 32,
+                    PropModeReplace, (unsigned char *)&fullscreen, 1);
+                    
         XMapWindow(display, window);
         XIfEvent(display, &event, wait_for_map, (char*)&window);
         XSetWMColormapWindows(display, window, &window, 1);

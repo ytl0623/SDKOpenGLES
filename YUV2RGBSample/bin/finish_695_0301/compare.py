@@ -1,3 +1,5 @@
+# source venv/bin/activate
+
 import numpy as np
 from PIL import Image
 import os
@@ -87,7 +89,7 @@ def compare_bitmaps(img1_path, img2_path):
 
 if __name__ == "__main__":
     # 設定要比對的兩張圖
-    file_a = "output_c_gradient.bmp"
-    file_b = "output_gradient.bmp"
+    file_a = "output_py_gradient.bmp"
+    file_b = "output_c_gradient.bmp"
     
     compare_bitmaps(file_a, file_b)

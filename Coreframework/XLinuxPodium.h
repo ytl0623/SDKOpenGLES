@@ -57,6 +57,10 @@
 #include <cstdlib>
 #include <EGL/egl.h>
 
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <X11/Xatom.h>
+
 #include "XPodium.h"
 
     class XLinuxPodium : public XPodium

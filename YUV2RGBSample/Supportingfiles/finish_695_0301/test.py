@@ -1,3 +1,5 @@
+# source venv/bin/activate
+
 import numpy as np
 from PIL import Image
 import os
@@ -167,7 +169,7 @@ if __name__ == "__main__":
         "W255.bmp"
     ]
 
-    output_file = "output_" + input_file
+    output_file = "output_py_" + input_file
     
     # 檢查檔案
     all_files = [input_file] + white_refs
