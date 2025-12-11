@@ -1,6 +1,8 @@
-export TOP_DIR =$(shell pwd)
-export ARCH = arm64
-export OUTPUT_DIR =$(TOP_DIR)/../bin
+# 20251211
+
+# export TOP_DIR =$(shell pwd)
+# export ARCH = arm64
+# export OUTPUT_DIR =$(TOP_DIR)/../bin
 LD_FLAGS= -lm -lpthread -ldl -lX11 -lxcb -lXau -lXdmcp -ldrm -lXfixes -lXext -lXdamage -lexpat -lEGL -lGLESv2 -lavformat -lavcodec -lavutil -lswscale
 LIB=-L$(MALI_LIBS)
 INC=-I$(MALI_INCLUDE) -I$(DRM_INCLUDE)
@@ -13,8 +15,8 @@ all: YUV2RGBSample $(srcfiles)
 
 YUV2RGBSample $(objects) : YUV2RGBonGPUSample.cpp $(srcfiles)
 	$(ARM_CROSS_COMPILER_PATH) -g YUV2RGBonGPUSample.cpp $(srcfiles) $(CXXFLAGS) $(LD_FLAGS) -o YUV2RGBSample $(INC) $(PROJ_INCLUDES) $(LIB)
-		cp -rf Supportingfiles bin
-		cp -rf YUV2RGBSample bin
+# 		cp -rf Supportingfiles bin
+# 		cp -rf YUV2RGBSample bin
 
 # The dependency file names.
 DEPS := $(objects:.o=.d)
@@ -30,10 +32,10 @@ else
 endif
 
 
-install: YUV2RGBSample
-	mkdir -p $(TOP_DIR)/../bin/$(bin)/YUV2RGBSample
-	cp -rf YUV2RGBSample  $(TOP_DIR)/../bin/$(bin)/YUV2RGBSample
-	cp -rf Supportingfiles  $(TOP_DIR)/../bin/$(bin)/YUV2RGBSample
+# install: YUV2RGBSample
+# 	mkdir -p $(TOP_DIR)/../bin/$(bin)/YUV2RGBSample
+# 	cp -rf YUV2RGBSample  $(TOP_DIR)/../bin/$(bin)/YUV2RGBSample
+# 	cp -rf Supportingfiles  $(TOP_DIR)/../bin/$(bin)/YUV2RGBSample
 
 
 depend: .depend
@@ -44,7 +46,7 @@ depend: .depend
 
 clean:
 	rm -f $(objects)
-	-rm -rf bin
+# 	-rm -rf bin
 	-rm -rf YUV2RGBSample
 	
 

@@ -20,7 +20,7 @@
 #include <string>
 #include <chrono>
 #include <stdio.h>
-#include <cmath> // 為了 abs()
+#include <cmath>
 
 // 自定義標頭檔 (假設這些是封裝好的視窗與 EGL 工具)
 #include "XLinuxPodium.h"
@@ -128,11 +128,11 @@ int imageHeight = 0;
 // 數值已經正規化到 [0, 1] 範圍 (原值/255)
 // 用於 Fragment Shader 中的分段線性插值
 const float FIXED_X[5] = {
-    32.0f/255.0f,   // 節點 1: 暗部 (Shadows)
-    64.0f/255.0f,  // 節點 2: 中間調偏暗
-    128.0f/255.0f,  // 節點 3: 中間調 (Midtones)
-    192.0f/255.0f,  // 節點 4: 中間調偏亮
-    255.0f/255.0f   // 節點 5: 亮部 (Highlights)
+    32.0f/255.0f,  // 第1段終點 (起點是 0)
+    64.0f/255.0f,
+    128.0f/255.0f,
+    192.0f/255.0f,
+    255.0f/255.0f  // 第5段終點 (也就是 1.0)
 };
 
 // ============================================================================
@@ -259,68 +259,65 @@ void main() {
  * 核心邏輯：讀取原始顏色，根據 5 個控制點紋理提供的 Y 值，進行曲線映射。
  */
 const char* fragmentShaderSource = R"(
-precision lowp float;      // 設定浮點數精度為低精度 (提升效能)
-varying vec2 vTexCoord;    // 從 Vertex Shader 接收的紋理座標
+precision highp float;      // 設定浮點數精度為低精度
+varying vec2 vTexCoord;    // 紋理座標
 
-// Uniforms: 外部傳入的紋理單元
 uniform sampler2D uInputTexture;    // 原始影像
-uniform sampler2D uControlPoint0;   // 控制點 0 的 Y 值圖 (對應 FIXED_X[0])
-uniform sampler2D uControlPoint1;   // 控制點 1 的 Y 值圖
-uniform sampler2D uControlPoint2;   // 控制點 2 的 Y 值圖
-uniform sampler2D uControlPoint3;   // 控制點 3 的 Y 值圖
-uniform sampler2D uControlPoint4;   // 控制點 4 的 Y 值圖
-uniform vec2 uFixedX[5];            // 5 個控制點的 X 座標 (固定值)
+uniform sampler2D uControlPoint0;   // 控制點 1 (x=32)
+uniform sampler2D uControlPoint1;   // 控制點 2 (x=64)
+uniform sampler2D uControlPoint2;   // 控制點 3 (x=128)
+uniform sampler2D uControlPoint3;   // 控制點 4 (x=192)
+uniform sampler2D uControlPoint4;   // 控制點 5 (x=255)
+uniform vec2 uFixedX[5];            // 5 個控制點的 X 座標
 
 // ----------------------------------------------------------------------------
-// 函數: 分段線性插值 (Piecewise Linear Interpolation)
+// 函數: 分段線性插值 (含原點 0,0)
 // ----------------------------------------------------------------------------
-/**
- * 給定輸入值 x 和 5 個控制點的輸出值 y0~y4，計算對應的輸出 y。
- * 邏輯：找出 x 落在 X 軸的哪個區間，然後在該區間內做線性插值。
- */
 float interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
-    // 取出 X 軸節點值
-    float x0 = uFixedX[0].x;
-    float x1 = uFixedX[1].x;
-    float x2 = uFixedX[2].x;
-    float x3 = uFixedX[3].x;
-    float x4 = uFixedX[4].x;
+    // 定義 X 軸節點 (Input Level)
+    float x0 = uFixedX[0].x; // 32/255
+    float x1 = uFixedX[1].x; // 64/255
+    float x2 = uFixedX[2].x; // 128/255
+    float x3 = uFixedX[3].x; // 192/255
+    float x4 = uFixedX[4].x; // 255/255 (1.0)
     
     float x_low, x_high, y_low, y_high;
     
-    // 判斷 x 所在的區間
+    // 判斷 x 所在的區間，現在包含從 (0,0) 開始的區間
     if (x < x0) {
-        // 區間 0 左側 (暗部): 使用 (x0, y0) 和 (x1, y1) 向外插值 (Extrapolation)
-        x_low = x0; x_high = x1;
-        y_low = y0; y_high = y1;
-    } else if (x > x4) {
-        // 區間 4 右側 (亮部): 使用 (x3, y3) 和 (x4, y4) 向外插值
-        x_low = x3; x_high = x4;
-        y_low = y3; y_high = y4;
+        // [區間 1] 0 到 P0: 連接原點(0,0) 與 P0(x0, y0)
+        x_low = 0.0;  y_low = 0.0;
+        x_high = x0;  y_high = y0;
+    } else if (x < x1) {
+        // [區間 2] P0 到 P1
+        x_low = x0;   y_low = y0;
+        x_high = x1;  y_high = y1;
+    } else if (x < x2) {
+        // [區間 3] P1 到 P2
+        x_low = x1;   y_low = y1;
+        x_high = x2;  y_high = y2;
+    } else if (x < x3) {
+        // [區間 4] P2 到 P3
+        x_low = x2;   y_low = y2;
+        x_high = x3;  y_high = y3;
     } else {
-        // 正常範圍內
-        if (x >= x0 && x <= x1) {
-            x_low = x0; x_high = x1;
-            y_low = y0; y_high = y1;
-        } else if (x >= x1 && x <= x2) {
-            x_low = x1; x_high = x2;
-            y_low = y1; y_high = y2;
-        } else if (x >= x2 && x <= x3) {
-            x_low = x2; x_high = x3;
-            y_low = y2; y_high = y3;
-        } else {
-            x_low = x3; x_high = x4;
-            y_low = y3; y_high = y4;
-        }
+        // [區間 5] P3 到 P4 (注意 x4 應該是 1.0)
+        // 任何大於 x3 的值都落在最後這一段
+        x_low = x3;   y_low = y3;
+        x_high = x4;  y_high = y4;
     }
     
-    // 計算斜率 m
-    float m = (y_high - y_low) / (x_high - x_low);
+    // 計算斜率 m = (y2 - y1) / (x2 - x1)
+    // 防止除以零 (雖然固定 X 軸通常不會重疊，但為了安全)
+    float denominator = x_high - x_low;
+    if (denominator == 0.0) return y_high;
+
+    float m = (y_high - y_low) / denominator;
     
-    // 線性方程: y = y_low + slope * (x - x_low)
+    // 線性方程: y = y_low + m * (x - x_low)
     float y = y_low + m * (x - x_low);
     
-    // 確保輸出值在 [0, 1] 範圍內
+    // 確保輸出值在 [0, 1] 範圍內 (防止溢出)
     return clamp(y, 0.0, 1.0);
 }
 
@@ -328,8 +325,7 @@ void main() {
     // 1. 採樣原始圖片顏色
     vec3 inputColor = texture2D(uInputTexture, vTexCoord).rgb;
     
-    // 2. 採樣 5 個控制點紋理在當前位置的值 (這些紋理儲存了局部的曲線調整參數)
-    // 假設控制圖是灰階的，取 R 通道即可代表亮度/數值
+    // 2. 採樣 5 個控制點紋理的 R 值作為 Y 軸數值
     float y0_r = texture2D(uControlPoint0, vTexCoord).r;
     float y1_r = texture2D(uControlPoint1, vTexCoord).r;
     float y2_r = texture2D(uControlPoint2, vTexCoord).r;
@@ -348,12 +344,12 @@ void main() {
     float y3_b = texture2D(uControlPoint3, vTexCoord).b;
     float y4_b = texture2D(uControlPoint4, vTexCoord).b;
     
-    // 3. 對 RGB 三個通道分別進行曲線映射
+    // 3. 執行插值 (加入原點邏輯)
     float newR = interpolate(inputColor.r, y0_r, y1_r, y2_r, y3_r, y4_r);
     float newG = interpolate(inputColor.g, y0_g, y1_g, y2_g, y3_g, y4_g);
     float newB = interpolate(inputColor.b, y0_b, y1_b, y2_b, y3_b, y4_b);
     
-    // 4. 輸出最終顏色
+    // 4. 輸出
     gl_FragColor = vec4(newR, newG, newB, 1.0);
 }
 )";
@@ -447,8 +443,8 @@ bool prepareGraphics(const char* inputFile, const char* controlFiles[5]) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, imageWidth, imageHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, &inputData[0]);
     
     // 設定紋理過濾與 Wrap 模式
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     
@@ -458,8 +454,8 @@ bool prepareGraphics(const char* inputFile, const char* controlFiles[5]) {
         glBindTexture(GL_TEXTURE_2D, controlPointTextureID[i]);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, imageWidth, imageHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, &controlData[i][0]);
         
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
@@ -504,6 +500,41 @@ void GraphicsUpdate() {
 }
 
 // ============================================================================
+// C++ CPU 端模擬 Shader 插值運算 (用於除錯)
+// ============================================================================
+// float cpu_interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
+//     // 定義 X 軸節點 (必須與 Shader 一致)
+//     float x0 = 32.0f/255.0f;
+//     float x1 = 64.0f/255.0f;
+//     float x2 = 128.0f/255.0f;
+//     float x3 = 192.0f/255.0f;
+//     float x4 = 255.0f/255.0f;
+    
+//     float x_low, x_high, y_low, y_high;
+    
+//     if (x < x0) {
+//         x_low = 0.0f; y_low = 0.0f; x_high = x0; y_high = y0;
+//     } else if (x < x1) {
+//         x_low = x0; y_low = y0; x_high = x1; y_high = y1;
+//     } else if (x < x2) {
+//         x_low = x1; y_low = y1; x_high = x2; y_high = y2;
+//     } else if (x < x3) {
+//         x_low = x2; y_low = y2; x_high = x3; y_high = y3;
+//     } else {
+//         x_low = x3; y_low = y3; x_high = x4; y_high = y4;
+//     }
+    
+//     float denominator = x_high - x_low;
+//     if (denominator == 0.0f) return y_high;
+
+//     float m = (y_high - y_low) / denominator;
+//     float y = y_low + m * (x - x_low);
+    
+//     // 限制範圍 0.0 ~ 1.0
+//     return (y < 0.0f) ? 0.0f : (y > 1.0f) ? 1.0f : y;
+// }
+
+// ============================================================================
 // 主程式 (Entry Point)
 // ============================================================================
 int main(int argc, char* argv[]) {
@@ -533,6 +564,22 @@ int main(int argc, char* argv[]) {
             return 1;
         }
     }
+
+    // float test_input = 150.0f / 255.0f;
+    
+    // // 設定 5 個控制點的值 (模擬 Shader 讀到的紋理值)
+    // // 假設 CP2 (對應 input 128) 是 64，其他點我們設為線性 (沒變)
+    // float cp_vals[5];
+    // cp_vals[0] = 32.0f  / 255.0f; // CP0
+    // cp_vals[1] = 64.0f  / 255.0f; // CP1
+    // cp_vals[2] = 128.0f / 255.0f; // CP2
+    // cp_vals[3] = 192.0f / 255.0f; // CP3
+    // cp_vals[4] = 255.0f / 255.0f; // CP4
+
+    // float result = cpu_interpolate(test_input, cp_vals[0], cp_vals[1], cp_vals[2], cp_vals[3], cp_vals[4]);
+    
+    // printf("\n[DEBUG 驗證] 輸入: %.2f -> 插值結果: %.2f (整數: %d)\n", test_input * 255.0f, 
+    //        result * 255.0f, (int)(result * 255.0f + 0.5f)); // +0.5 作為四捨五入
     
     printf("\n--- 系統就緒，開始渲染迴圈 ---\n");
     printf("按任意鍵或關閉視窗以退出...\n\n");
@@ -805,7 +852,6 @@ int main(int argc, char* argv[]) {
 // // ============================================================================
 // // Shader Source (保持不變)
 // // ============================================================================
-// // 為了節省篇幅，這裡直接使用原變數名，內容請保持你原本的 vertexShaderSource 和 fragmentShaderSource
 // const char* vertexShaderSource = R"(
 // attribute vec2 aPosition;
 // attribute vec2 aTexCoord;
@@ -1252,16 +1298,19 @@ int main(int argc, char* argv[]) {
 // precision lowp float;
 // varying vec2 vTexCoord;
 
-// // 輸入改為 3 個紋理
+// // YUV 紋理輸入
 // uniform sampler2D uTextureY;
 // uniform sampler2D uTextureU;
 // uniform sampler2D uTextureV;
 
+// // 5張控制點紋理 (代表 P0 ~ P4)
 // uniform sampler2D uControlPoint0;
 // uniform sampler2D uControlPoint1;
 // uniform sampler2D uControlPoint2;
 // uniform sampler2D uControlPoint3;
 // uniform sampler2D uControlPoint4;
+
+// // X軸座標定義 (Input Levels)
 // uniform vec2 uFixedX[5];
 
 // // YUV 轉 RGB 函數 (使用 BT.601 標準)
@@ -1270,34 +1319,65 @@ int main(int argc, char* argv[]) {
 //     float u = texture2D(uTextureU, uv).r - 0.5;
 //     float v = texture2D(uTextureV, uv).r - 0.5;
     
+//     // 轉換公式
 //     float r = y + 1.402 * v;
 //     float g = y - 0.34414 * u - 0.71414 * v;
 //     float b = y + 1.772 * u;
     
 //     return vec3(r, g, b);
 // }
-
 // float interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
-//     float x0 = uFixedX[0].x; float x1 = uFixedX[1].x; float x2 = uFixedX[2].x; float x3 = uFixedX[3].x; float x4 = uFixedX[4].x;
+//     // 取得 X 軸節點位置
+//     float x0 = uFixedX[0].x; // 32/255
+//     float x1 = uFixedX[1].x; // 64/255
+//     float x2 = uFixedX[2].x; // 128/255
+//     float x3 = uFixedX[3].x; // 192/255
+//     float x4 = uFixedX[4].x; // 255/255 (1.0)
+    
 //     float x_low, x_high, y_low, y_high;
-//     // ... (保持原有的插值邏輯，為節省空間此處省略，請填入原本的 if-else 邏輯) ...
-//     if (x < x0) { x_low = x0; x_high = x1; y_low = y0; y_high = y1; }
-//     else if (x > x4) { x_low = x3; x_high = x4; y_low = y3; y_high = y4; }
-//     else {
-//         if (x >= x0 && x <= x1) { x_low = x0; x_high = x1; y_low = y0; y_high = y1; }
-//         else if (x >= x1 && x <= x2) { x_low = x1; x_high = x2; y_low = y1; y_high = y2; }
-//         else if (x >= x2 && x <= x3) { x_low = x2; x_high = x3; y_low = y2; y_high = y3; }
-//         else { x_low = x3; x_high = x4; y_low = y3; y_high = y4; }
+    
+//     // 判斷 x 所在的區間
+//     if (x <= x0) {
+//         // [區間 1] 0 到 P0: 連接原點(0,0) 與 P0(x0, y0)
+//         // 這是確保黑畫面保持全黑的關鍵
+//         x_low = 0.0;  y_low = 0.0;
+//         x_high = x0;  y_high = y0;
+//     } else if (x <= x1) {
+//         // [區間 2] P0 到 P1
+//         x_low = x0;   y_low = y0;
+//         x_high = x1;  y_high = y1;
+//     } else if (x <= x2) {
+//         // [區間 3] P1 到 P2
+//         x_low = x1;   y_low = y1;
+//         x_high = x2;  y_high = y2;
+//     } else if (x <= x3) {
+//         // [區間 4] P2 到 P3
+//         x_low = x2;   y_low = y2;
+//         x_high = x3;  y_high = y3;
+//     } else {
+//         // [區間 5] P3 到 P4
+//         // 假設 x4 為 1.0，處理所有高亮區域
+//         x_low = x3;   y_low = y3;
+//         x_high = x4;  y_high = y4;
 //     }
-//     float m = (y_high - y_low) / (x_high - x_low);
-//     return clamp(y_low + m * (x - x_low), 0.0, 1.0);
+    
+//     // 避免除以零 (雖然固定 X 軸通常不會重疊)
+//     float denominator = x_high - x_low;
+//     if (denominator == 0.0) return y_high;
+
+//     // 計算線性斜率並插值
+//     float m = (y_high - y_low) / denominator;
+//     float y = y_low + m * (x - x_low);
+    
+//     // 限制輸出範圍在 [0, 1]
+//     return clamp(y, 0.0, 1.0);
 // }
 
 // void main() {
-//     // 1. 先在 Shader 中做 YUV 轉 RGB
+//     // 1. 先將影片像素從 YUV 轉為 RGB
 //     vec3 inputColor = yuv2rgb(vTexCoord);
 
-//     // 2. 接著做原本的 Demura 補償
+//     // 2. 採樣 5 個控制點紋理 (取 R 通道代表亮度/數值)
 //     float y0_r = texture2D(uControlPoint0, vTexCoord).r;
 //     float y1_r = texture2D(uControlPoint1, vTexCoord).r;
 //     float y2_r = texture2D(uControlPoint2, vTexCoord).r;
@@ -1316,16 +1396,16 @@ int main(int argc, char* argv[]) {
 //     float y3_b = texture2D(uControlPoint3, vTexCoord).b;
 //     float y4_b = texture2D(uControlPoint4, vTexCoord).b;
 
-//     gl_FragColor = vec4(
-//         interpolate(inputColor.r, y0_r, y1_r, y2_r, y3_r, y4_r),
-//         interpolate(inputColor.g, y0_g, y1_g, y2_g, y3_g, y4_g),
-//         interpolate(inputColor.b, y0_b, y1_b, y2_b, y3_b, y4_b),
-//         1.0
-//     );
+//     // 3. 對 RGB 三個通道分別進行插值計算
+//     float outR = interpolate(inputColor.r, y0_r, y1_r, y2_r, y3_r, y4_r);
+//     float outG = interpolate(inputColor.g, y0_g, y1_g, y2_g, y3_g, y4_g);
+//     float outB = interpolate(inputColor.b, y0_b, y1_b, y2_b, y3_b, y4_b);
+
+//     // 4. 輸出最終顏色
+//     gl_FragColor = vec4(outR, outG, outB, 1.0);
 // }
 // )";
 
-// // ... (compileShader 保持不變) ...
 // GLuint compileShader(GLenum type, const char* source) {
 //     GLuint shader = glCreateShader(type);
 //     glShaderSource(shader, 1, &source, NULL);

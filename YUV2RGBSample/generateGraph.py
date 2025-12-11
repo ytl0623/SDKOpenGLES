@@ -69,42 +69,65 @@
 import numpy as np
 from PIL import Image
 
-def create_grayscale_gradient_bmp():
-    # 1. 設定圖片尺寸
-    width, height = 1920, 1080
-    output_filename = 'gradient.bmp'
-
-    print(f"正在生成 {width}x{height} 的灰階漸層圖 (0 -> 255)...")
-
-    # 2. 產生漸層數據 (核心演算法)
-    # np.linspace(0, 255, width): 在 0 到 255 之間產生 1920 個均勻分佈的浮點數
-    # 例如: 0.0, 0.13, 0.26 ... 254.8, 255.0
-    gradient_row = np.linspace(0, 255, width)
-
-    # 3. 將這一行數據複製 height (1080) 次，形成二維矩陣
-    # np.tile(array, (rows, cols))
-    image_data = np.tile(gradient_row, (height, 1))
-
-    # 4. 轉換數據格式
-    # 將浮點數轉為 8-bit 整數 (uint8)，這是圖片像素的標準格式
-    image_data = image_data.astype(np.uint8)
-
-    # 5. 建立圖片物件
-    # mode='L' 代表 8-bit 灰階圖
-    img = Image.fromarray(image_data, mode='L')
-
-    # 6. 轉為 RGB 模式 (24-bit)
-    # 因為您之前的需求是 24-bit BMP，我們把單色灰階轉為 RGB 格式 (R=G=B)
-    img_rgb = img.convert('RGB')
-
-    # 7. 儲存檔案
-    img_rgb.save(output_filename)
-    print(f"已完成！圖片儲存為: {output_filename}")
+def create_gradient_bmp(color_mode='white'):
+    """
+    產生指定顏色的 1920x1080 漸層圖 (0 -> 255)
     
-    # 驗證一下最左邊和最右邊的數值
-    print(f"驗證像素值:")
-    print(f"  最左邊 (x=0): {img_rgb.getpixel((0, 500))}")
-    print(f"  最右邊 (x=1919): {img_rgb.getpixel((1919, 500))}")
+    Args:
+        color_mode (str): 選擇顏色模式 - 'red', 'green', 'blue', 'white'
+    """
+    
+    # 1. 基本設定
+    width, height = 1920, 1080
+    output_filename = f'gradient_{color_mode}.bmp'
+    
+    print(f"[{color_mode.upper()}] 正在生成 {width}x{height} 漸層圖...")
+
+    # 2. 準備基礎數據
+    # 漸層數據 (0 -> 255)
+    gradient_row = np.linspace(0, 255, width)
+    full_gradient = np.tile(gradient_row, (height, 1)).astype(np.uint8)
+    
+    # 全黑數據 (0)
+    full_zeros = np.zeros((height, width), dtype=np.uint8)
+
+    # 3. 根據顏色模式分配 R, G, B 通道
+    if color_mode == 'red':
+        r, g, b = full_gradient, full_zeros, full_zeros
+    elif color_mode == 'green':
+        r, g, b = full_zeros, full_gradient, full_zeros
+    elif color_mode == 'blue':
+        r, g, b = full_zeros, full_zeros, full_gradient
+    elif color_mode == 'white':
+        # 白色即為標準灰階 (R=G=B)
+        r, g, b = full_gradient, full_gradient, full_gradient
+    else:
+        print("錯誤: 不支援的顏色模式，請使用 red, green, blue 或 white")
+        return
+
+    # 4. 合併通道 (Stack)
+    # 組合出 (Height, Width, 3) 的矩陣
+    rgb_data = np.dstack((r, g, b))
+
+    # 5. 建立圖片並儲存
+    img = Image.fromarray(rgb_data, mode='RGB')
+    img.save(output_filename)
+    
+    print(f" -> 已儲存為: {output_filename}")
+    
+    # 簡單驗證中間點的像素值
+    mid_x = width // 2
+    mid_pixel = img.getpixel((mid_x, 500))
+    print(f" -> 中間點像素值 (x={mid_x}): {mid_pixel}\n")
 
 if __name__ == "__main__":
-    create_grayscale_gradient_bmp()
+    # 您可以在這裡修改要產生的顏色
+    # create_gradient_bmp('red')
+    # create_gradient_bmp('green')
+    # create_gradient_bmp('blue')
+    # create_gradient_bmp('white')
+
+    # 或者一次產生全部四種圖：
+    colors = ['red', 'green', 'blue', 'white']
+    for c in colors:
+        create_gradient_bmp(c)
