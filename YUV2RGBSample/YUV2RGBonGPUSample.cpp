@@ -1,14 +1,8 @@
-// cd SDKOpenGLES/YUV2RGBSample/ 
+// cd SDKOpenGLES/YUV2RGBSample/
 // source ../run_exports.sh
-// export DISPLAY=:0
 // make clean
 // make
-// ./YUV2RGBSample  Supportingfiles/blue.bmp  gray_90.bmp  gray_150.bmp gray_180.bmp gray_200.bmp gray_250.bmp
-// last edited: 20251119
-// 20251119 調整解析度:1920*1080
-// 20251119 增加註解
-// 20251117 計算各階段時間
-// 20251111 針對RGB三通道插值計算
+// last edited: 20251211
 
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
@@ -121,23 +115,14 @@ GLuint controlPointTextureID[5]; // 5個控制點圖片的紋理 ID
 int imageWidth = 0;
 int imageHeight = 0;
 
-// ============================================================================
-// 曲線調整參數
-// ============================================================================
-// 這些是色彩曲線上的固定 X 座標節點 (Input Level)
-// 數值已經正規化到 [0, 1] 範圍 (原值/255)
-// 用於 Fragment Shader 中的分段線性插值
 const float FIXED_X[5] = {
-    32.0f/255.0f,  // 第1段終點 (起點是 0)
+    32.0f/255.0f,
     64.0f/255.0f,
     128.0f/255.0f,
     192.0f/255.0f,
-    255.0f/255.0f  // 第5段終點 (也就是 1.0)
+    255.0f/255.0f
 };
 
-// ============================================================================
-// 頂點資料 (Quad Data)
-// ============================================================================
 // 全螢幕四邊形的頂點座標 (Normalized Device Coordinates, NDC)
 // 範圍從 -1.0 (左/下) 到 1.0 (右/上)
 const GLfloat vertexVertices[] = {
@@ -159,14 +144,6 @@ const GLfloat textureVertices[] = {
 // ============================================================================
 // 函數：載入 BMP 圖片
 // ============================================================================
-/**
- * 讀取 24-bit BMP 檔案並轉換為 RGB 陣列
- * * @param filename 檔案路徑
- * @param data 輸出: 儲存像素資料的 vector (RGB順序)
- * @param width 輸出: 圖片寬度
- * @param height 輸出: 圖片高度
- * @return 成功回傳 true，失敗回傳 false
- */
 bool loadBMP(const char* filename, vector<unsigned char>& data, int& width, int& height) {
     FILE* file = fopen(filename, "rb");
     if (!file) {
@@ -259,7 +236,7 @@ void main() {
  * 核心邏輯：讀取原始顏色，根據 5 個控制點紋理提供的 Y 值，進行曲線映射。
  */
 const char* fragmentShaderSource = R"(
-precision highp float;      // 設定浮點數精度為低精度
+precision highp float;     // 設定浮點數精度為高精度
 varying vec2 vTexCoord;    // 紋理座標
 
 uniform sampler2D uInputTexture;    // 原始影像
@@ -279,7 +256,7 @@ float interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
     float x1 = uFixedX[1].x; // 64/255
     float x2 = uFixedX[2].x; // 128/255
     float x3 = uFixedX[3].x; // 192/255
-    float x4 = uFixedX[4].x; // 255/255 (1.0)
+    float x4 = uFixedX[4].x; // 255/255
     
     float x_low, x_high, y_low, y_high;
     
@@ -398,6 +375,7 @@ bool prepareGraphics(const char* inputFile, const char* controlFiles[5]) {
         if (!loadBMP(controlFiles[i], controlData[i], w, h)) {
             return false;
         }
+
         // 檢查尺寸一致性：控制圖必須與原圖大小相同
         if (w != imageWidth || h != imageHeight) {
             printf("錯誤: 控制點圖片尺寸 (%dx%d) 與原圖不符\n", w, h);
@@ -461,7 +439,7 @@ bool prepareGraphics(const char* inputFile, const char* controlFiles[5]) {
     }
     
     // 9. 基本 OpenGL 設定
-    glClearColor(0.0f, 0.0f, 0.2f, 1.0f); // 背景設為深藍色
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f); // 背景設為深藍色
     glDisable(GL_DEPTH_TEST); // 2D 圖像處理不需要深度測試
     
     printf("OpenGL 初始化完成。\n");
@@ -1614,3 +1592,5 @@ int main(int argc, char* argv[]) {
 
 //     return 0;
 // }
+
+

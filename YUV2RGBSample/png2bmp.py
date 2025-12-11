@@ -37,6 +37,6 @@ def convert_png_to_bmp(png_path, output_path=None):
 
 if __name__ == "__main__":
     # 在這裡修改你的檔名
-    source_file = "output_red_128.png" 
+    source_file = "32.png" 
     
     convert_png_to_bmp(source_file)
