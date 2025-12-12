@@ -190,17 +190,17 @@ def process_rgb_compensation_white_refs(input_path, white_refs_paths, output_pat
 if __name__ == "__main__":
     # ================= 設定檔案路徑 =================
     
-    input_file = "Supportingfiles/test/red_192.bmp"
+    input_file = "Supportingfiles/test/gradient_red.bmp"
     
     white_refs = [
-        "Supportingfiles/test/red_32.bmp",
-        "Supportingfiles/test/red_64.bmp",
-        "Supportingfiles/test/red_128.bmp",
-        "Supportingfiles/test/red_192.bmp",
-        "Supportingfiles/test/red_255.bmp"
+        "Supportingfiles/135/Correction-Red-32.bmp",
+        "Supportingfiles/135/Correction-Red-64.bmp",
+        "Supportingfiles/135/Correction-Red-128.bmp",
+        "Supportingfiles/135/Correction-Red-192.bmp",
+        "Supportingfiles/135/Correction-Red-255.bmp"
     ]
 
-    output_file = "output_py_red_192.bmp"
+    output_file = "output_py_gradient_red.bmp"
     
     # 檢查檔案
     all_files = [input_file] + white_refs

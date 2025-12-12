@@ -31,15 +31,15 @@ unsigned char clip(float val) {
 
 int main() {
     // ================= 設定檔案路徑 =================
-    const char *input_file = "Supportingfiles/test/red_192.bmp";
-    const char *output_file = "output_c_red_192.bmp";
+    const char *input_file = "Supportingfiles/test/gradient_red.bmp";
+    const char *output_file = "output_c_gradient_red.bmp";
     
     const char *white_refs_paths[] = {
-        "Supportingfiles/test/red_32.bmp",
-        "Supportingfiles/test/red_64.bmp",
-        "Supportingfiles/test/red_128.bmp",
-        "Supportingfiles/test/red_192.bmp",
-        "Supportingfiles/test/red_255.bmp"
+        "Supportingfiles/135/Correction-Red-32.bmp",
+        "Supportingfiles/135/Correction-Red-64.bmp",
+        "Supportingfiles/135/Correction-Red-128.bmp",
+        "Supportingfiles/135/Correction-Red-192.bmp",
+        "Supportingfiles/135/Correction-Red-255.bmp"
     };
     const int num_refs = 5;
 
