@@ -1,4 +1,3 @@
-
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <EGL/egl.h>
@@ -29,6 +28,7 @@ using std::string;
 using std::vector;
 
 // ... (Timer 類別與 BMP 結構定義保持不變) ...
+// 簡單的計時器類別，用於測量程式碼區塊的執行時間
 class Timer {
 private:
     std::chrono::high_resolution_clock::time_point start_time;
@@ -44,6 +44,7 @@ public:
     }
 };
 
+// 設定結構體對齊為 1 byte，避免編譯器自動補齊造成讀取 BMP 標頭錯誤
 #pragma pack(push, 1)
 
 // BMP 檔案標頭 (File Header) - 共 14 bytes
@@ -70,18 +71,19 @@ typedef struct {
     uint32_t importantcolours;  // 重要顏色數
 } BMPInfoHeader;
 
-#pragma pack(pop)
+#pragma pack(pop) // 恢復原本的對齊設定
 
 // ============================================================================
 // 修改後的 VideoReader (移除 sws_scale，直接輸出 raw frame)
+// 用途：負責透過 FFmpeg 解碼影片，但不進行任何軟體顏色轉換
 // ============================================================================
 class VideoReader {
 public:
     AVFormatContext* format_ctx = nullptr;
     AVCodecContext* codec_ctx = nullptr;
     int video_stream_index = -1;
-    AVFrame* frame = nullptr;
-    AVPacket* packet = nullptr;
+    AVFrame* frame = nullptr;   // 存放解碼後的原始 YUV 數據
+    AVPacket* packet = nullptr; // 存放解碼前的壓縮數據
     int width = 0;
     int height = 0;
 
@@ -94,17 +96,23 @@ public:
         if (format_ctx) avformat_close_input(&format_ctx);
     }
 
+    // 開啟影片檔並初始化解碼器
     bool open(const char* filename) {
+        // 1. 打開輸入流
         if (avformat_open_input(&format_ctx, filename, nullptr, nullptr) != 0) return false;
+        // 2. 讀取串流資訊
         if (avformat_find_stream_info(format_ctx, nullptr) < 0) return false;
 
+        // 3. 尋找最佳的視訊串流
         const AVCodec *codec = NULL;
         video_stream_index = av_find_best_stream(format_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &codec, 0);
         if (video_stream_index < 0) return false;
 
+        // 4. 配置解碼器上下文
         codec_ctx = avcodec_alloc_context3(codec);
         avcodec_parameters_to_context(codec_ctx, format_ctx->streams[video_stream_index]->codecpar);
 
+        // 5. 開啟解碼器
         if (avcodec_open2(codec_ctx, codec, nullptr) < 0) return false;
 
         width = codec_ctx->width;
@@ -114,24 +122,28 @@ public:
         frame = av_frame_alloc();
         packet = av_packet_alloc();
         
-        // 這裡不再需要 sws_getContext，因為我們不做 CPU 轉換了
+        // 注意：這裡移除了 sws_getContext，因為我們要在 Shader 中處理 YUV 轉 RGB
         return true;
     }
 
-    // 修改：直接回傳是否讀取成功，數據保留在 frame 成員變數中供外部存取
+    // 讀取並解碼下一幀
+    // 回傳：true 代表成功讀取到一幀，false 代表影片結束或錯誤
     bool readNextFrame() {
         while (av_read_frame(format_ctx, packet) >= 0) {
             if (packet->stream_index == video_stream_index) {
+                // 發送壓縮封包給解碼器
                 if (avcodec_send_packet(codec_ctx, packet) == 0) {
+                    // 從解碼器接收解碼後的幀 (Raw Frame)
                     int ret = avcodec_receive_frame(codec_ctx, frame);
                     if (ret == 0) {
                         av_packet_unref(packet);
-                        return true; 
+                        return true; // 成功取得一幀 YUV 數據
                     }
                 }
             }
             av_packet_unref(packet);
         }
+        // 影片播放完畢，跳回開頭循環播放
         av_seek_frame(format_ctx, video_stream_index, 0, AVSEEK_FLAG_BACKWARD);
         return false; 
     }
@@ -147,15 +159,16 @@ GLuint programID;
 GLint iLocPosition = -1;
 GLint iLocTexCoord = -1;
 
-// 修改：需要 3 個紋理位置變數 (Y, U, V)
+// 修改：需要 3 個紋理位置變數 (分別對應 Y, U, V 平面)
 GLint iLocTextureY = -1;
 GLint iLocTextureU = -1;
 GLint iLocTextureV = -1;
 
+// 控制點紋理與參數
 GLint iLocControlPoint[5];
 GLint iLocFixedX = -1;
 
-// 修改：需要 3 個紋理 ID
+// 修改：需要 3 個紋理 ID 來儲存 Y, U, V 數據
 GLuint textureIdY;
 GLuint textureIdU;
 GLuint textureIdV;
@@ -165,6 +178,7 @@ GLuint controlPointTextureID[5];
 int imageWidth = 1920;
 int imageHeight = 1080;
 
+// 定義 5 個控制點的 X 軸亮度分佈 (0~1 之間)
 const float FIXED_X[5] = {
     32.0f/255.0f,
     64.0f/255.0f,
@@ -173,6 +187,7 @@ const float FIXED_X[5] = {
     255.0f/255.0f
 };
 
+// 頂點座標 (全螢幕四邊形)
 const GLfloat vertexVertices[] = {
     -1.0f, -1.0f,  // 左下
      1.0f, -1.0f,  // 右下
@@ -180,13 +195,15 @@ const GLfloat vertexVertices[] = {
      1.0f,  1.0f   // 右上
 };
 
+// 紋理座標 (UV，左上角為 0,0)
 const GLfloat textureVertices[] = {
-    0.0f, 1.0f,  // 左下
+    0.0f, 1.0f,  // 左下 (OpenGL 紋理座標 Y 軸向上，視情況調整)
     1.0f, 1.0f,  // 右下
     0.0f, 0.0f,  // 左上
     1.0f, 0.0f   // 右上
 };
 
+// 讀取 BMP 圖片函式
 bool loadBMP(const char* filename, vector<unsigned char>& data, int& width, int& height) {
     FILE* file = fopen(filename, "rb");
     if (!file) {
@@ -222,7 +239,7 @@ bool loadBMP(const char* filename, vector<unsigned char>& data, int& width, int&
     width = infoHeader.width;
     height = std::abs(infoHeader.height); // 高度可能為負，表示由上而下儲存
     
-    // BMP 的每一列 (Row) 資料長度必須是 4 bytes 的倍數
+    // BMP 的每一列 (Row) 資料長度必須是 4 bytes 的倍數 (Padding)
     // 計算每列包含 Padding 的實際位元組數
     int rowSize = ((width * 3 + 3) / 4) * 4;
     int imageSize = rowSize * height;
@@ -252,6 +269,7 @@ bool loadBMP(const char* filename, vector<unsigned char>& data, int& width, int&
 
 // ============================================================================
 // Vertex Shader (頂點著色器)
+// 用途：處理頂點位置與紋理座標的傳遞
 // ============================================================================
 const char* vertexShaderSource = R"(
 attribute vec2 aPosition;
@@ -264,32 +282,37 @@ void main() {
 }
 )";
 
-// 新的 Fragment Shader: YUV -> RGB 轉換 + Demura
+// ============================================================================
+// Fragment Shader (片段著色器) - 核心邏輯
+// 用途：1. 將 YUV 轉為 RGB 
+//       2. 讀取 5 張控制點圖
+//       3. 根據當前像素亮度進行分段線性插值 (De-mura 補償)
+// ============================================================================
 const char* fragmentShaderSource = R"(
 precision highp float;
 varying vec2 vTexCoord;
 
-// YUV 紋理輸入
+// YUV 紋理輸入 (YUV420P 被拆成三個單通道紋理)
 uniform sampler2D uTextureY;
 uniform sampler2D uTextureU;
 uniform sampler2D uTextureV;
 
-// 5張控制點紋理
+// 5張控制點紋理 (用於亮度補償)
 uniform sampler2D uControlPoint0;
 uniform sampler2D uControlPoint1;
 uniform sampler2D uControlPoint2;
 uniform sampler2D uControlPoint3;
 uniform sampler2D uControlPoint4;
 
-// X軸座標定義
+// X軸座標定義 (亮度分界點)
 uniform float uFixedX[5];
 
 // --- YUV 轉 RGB 函數 ---
 // 使用 BT.709 標準 (適用於 HDTV/MP4 1920x1080)
-// 如果顏色看起來太淡或太濃，可改回原本的 BT.601
+// 這裡將 YUV 轉回 RGB 以便進行後續的顏色補償運算
 vec3 yuv2rgb(vec2 uv) {
     float y = texture2D(uTextureY, uv).r;
-    float u = texture2D(uTextureU, uv).r - 0.5;
+    float u = texture2D(uTextureU, uv).r - 0.5; // GL讀取為 0~1，需平移回 -0.5~0.5
     float v = texture2D(uTextureV, uv).r - 0.5;
     
     // BT.709 轉換矩陣 (HD 標準)
@@ -300,7 +323,9 @@ vec3 yuv2rgb(vec2 uv) {
     return vec3(r, g, b);
 }
 
-// 分段線性插值 (含原點 0,0 錨定邏輯)
+// 分段線性插值函數 (含原點 0,0 錨定邏輯)
+// x: 輸入的原始亮度值 (R, G, 或 B)
+// y0~y4: 該像素位置在 5 張控制圖上的補償目標值
 float interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
     float x0 = uFixedX[0];
     float x1 = uFixedX[1];
@@ -310,8 +335,9 @@ float interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
     
     float x_low, x_high, y_low, y_high;
     
+    // 判斷 x 落在哪個區間，決定使用哪兩點進行插值
     if (x < x0) {
-        x_low = 0.0;  y_low = 0.0;
+        x_low = 0.0;  y_low = 0.0; // 隱含的第 0 點 (黑電平)
         x_high = x0;  y_high = y0;
     } else if (x < x1) {
         x_low = x0;   y_low = y0;
@@ -330,22 +356,23 @@ float interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
     float denominator = x_high - x_low;
     if (denominator == 0.0) return y_high;
 
+    // 計算斜率 m
     float m = (y_high - y_low) / denominator;
 
     // 線性方程: y = y_low + m * (x - x_low)
     float y = y_low + m * (x - x_low);
 
     // 確保輸出值在 [0, 1] 範圍內 (防止溢出)
-    // return (y < 0.0f) ? 0.0f : ((y > 1.0f) ? 1.0f : y);
-    return (y < 0.0) ? 0.0 : ((y > 1.0) ? 1.0 : y); // RTX 2070
+    return (y < 0.0) ? 0.0 : ((y > 1.0) ? 1.0 : y); 
 }
 
 void main() {
     // 1. 將 YUV 轉為 RGB 取得原始像素顏色
     vec3 inputColor = yuv2rgb(vTexCoord);
 
-    // 2. 採樣 5 個控制點紋理，並修正名稱以便加入保護邏輯
-
+    // 2. 採樣 5 個控制點紋理
+    // 分別取得該像素在不同亮度等級下的補償值 (Texture Lookup)
+    
     // --- R Channel (紅色通道) ---
     float r0 = texture2D(uControlPoint0, vTexCoord).r;
     float r1 = texture2D(uControlPoint1, vTexCoord).r;
@@ -367,7 +394,8 @@ void main() {
     float b3 = texture2D(uControlPoint3, vTexCoord).b;
     float b4 = texture2D(uControlPoint4, vTexCoord).b;
 
-    // 3. 執行插值補償 (使用修正後的變數 r0~r4 等)
+    // 3. 執行插值補償
+    // 根據原始輸入值 (inputColor.r/g/b) 與控制點 (r0~r4 等) 計算最終輸出
     float newR = interpolate(inputColor.r, r0, r1, r2, r3, r4);
     float newG = interpolate(inputColor.g, g0, g1, g2, g3, g4);
     float newB = interpolate(inputColor.b, b0, b1, b2, b3, b4);
@@ -378,6 +406,7 @@ void main() {
 
 )";
 
+// 編譯 Shader 的輔助函式
 GLuint compileShader(GLenum type, const char* source) {
     GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &source, NULL);
@@ -400,11 +429,14 @@ GLuint compileShader(GLenum type, const char* source) {
     return shader;
 }
 
+// 初始化圖形資源：讀取影片、讀取控制圖、編譯 Shader、建立紋理
 bool prepareGraphics(const char* videoFile, const char* controlFiles[5]) {
+    // 1. 初始化影片讀取器
     if (!videoReader.open(videoFile)) {
         return false;
     }
     
+    // 2. 讀取 5 張 BMP 控制圖
     vector<unsigned char> controlData[5];
     for (int i = 0; i < 5; i++) {
         int w, h;
@@ -412,13 +444,14 @@ bool prepareGraphics(const char* videoFile, const char* controlFiles[5]) {
             return false;
         }
 
-        // 檢查尺寸一致性：控制圖必須與原圖大小相同
+        // 檢查尺寸一致性：控制圖必須與原圖大小相同 (Mura 補償通常是 Pixel-to-Pixel)
         if (w != imageWidth || h != imageHeight) {
             printf("錯誤: 控制點圖片尺寸 (%dx%d) 與原圖不符\n", w, h);
             return false;
         }
     }
 
+    // 3. 編譯與連結 Shader Program
     GLuint vertShader = compileShader(GL_VERTEX_SHADER, vertexShaderSource);
     GLuint fragShader = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSource);
 
@@ -430,14 +463,16 @@ bool prepareGraphics(const char* videoFile, const char* controlFiles[5]) {
     glLinkProgram(programID);
     glUseProgram(programID);
 
+    // 4. 獲取 Shader 變數位置 (Uniform Location)
     iLocPosition = glGetAttribLocation(programID, "aPosition");
     iLocTexCoord = glGetAttribLocation(programID, "aTexCoord");
     
-    // 獲取新的 Uniform Locations
+    // YUV 三個通道的 Texture Sampler
     iLocTextureY = glGetUniformLocation(programID, "uTextureY");
     iLocTextureU = glGetUniformLocation(programID, "uTextureU");
     iLocTextureV = glGetUniformLocation(programID, "uTextureV");
     
+    // 控制點 Texture Sampler
     iLocControlPoint[0] = glGetUniformLocation(programID, "uControlPoint0");
     iLocControlPoint[1] = glGetUniformLocation(programID, "uControlPoint1");
     iLocControlPoint[2] = glGetUniformLocation(programID, "uControlPoint2");
@@ -446,13 +481,15 @@ bool prepareGraphics(const char* videoFile, const char* controlFiles[5]) {
     
     iLocFixedX = glGetUniformLocation(programID, "uFixedX");
 
+    // 5. 設定頂點屬性
     glEnableVertexAttribArray(iLocPosition);
     glVertexAttribPointer(iLocPosition, 2, GL_FLOAT, GL_FALSE, 0, vertexVertices);
 
     glEnableVertexAttribArray(iLocTexCoord);
     glVertexAttribPointer(iLocTexCoord, 2, GL_FLOAT, GL_FALSE, 0, textureVertices);
 
-    // Texture Y
+    // 6. 建立並設置 YUV 紋理 (預先分配記憶體)
+    // Texture Y: 解析度 WxH, 單通道 (GL_LUMINANCE)
     glGenTextures(1, &textureIdY);
     glBindTexture(GL_TEXTURE_2D, textureIdY);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, videoReader.width, videoReader.height, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, NULL);
@@ -461,7 +498,7 @@ bool prepareGraphics(const char* videoFile, const char* controlFiles[5]) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    // Texture U: 寬/2 x 高/2 (YUV420p)
+    // Texture U: 解析度 W/2 x H/2 (因為是 YUV420P)
     glGenTextures(1, &textureIdU);
     glBindTexture(GL_TEXTURE_2D, textureIdU);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, videoReader.width / 2, videoReader.height / 2, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, NULL);
@@ -470,7 +507,7 @@ bool prepareGraphics(const char* videoFile, const char* controlFiles[5]) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    // Texture V: 寬/2 x 高/2
+    // Texture V: 解析度 W/2 x H/2
     glGenTextures(1, &textureIdV);
     glBindTexture(GL_TEXTURE_2D, textureIdV);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, videoReader.width / 2, videoReader.height / 2, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, NULL);
@@ -479,12 +516,13 @@ bool prepareGraphics(const char* videoFile, const char* controlFiles[5]) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    // 7. 建立控制點紋理 (保持不變)
+    // 7. 建立控制點紋理並上傳資料 (靜態圖，只傳一次)
     for (int i = 0; i < 5; i++) {
         glGenTextures(1, &controlPointTextureID[i]);
         glBindTexture(GL_TEXTURE_2D, controlPointTextureID[i]);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, imageWidth, imageHeight, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, &controlData[i][0]);
         
+        // 使用線性插值 (GL_LINEAR) 使控制圖平滑
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -492,21 +530,23 @@ bool prepareGraphics(const char* videoFile, const char* controlFiles[5]) {
     }
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_DEPTH_TEST); // 2D 影片播放不需要深度測試
     
     printf("OpenGL 初始化完成。\n");
     return true;
 }
 
+// 每一幀的渲染循環
 void GraphicsUpdate() {
-    // 1. 從 FFmpeg 讀取下一幀 (資料在 videoReader.frame 中)
+    // 1. 從 FFmpeg 讀取下一幀 (資料會更新在 videoReader.frame 中)
     if (videoReader.readNextFrame()) {
         // 2. 分別更新 Y, U, V 紋理
-        // 注意：data[0] 是 Y, data[1] 是 U, data[2] 是 V
+        // YUV420P 記憶體佈局：data[0] 是 Y, data[1] 是 U, data[2] 是 V
         
         // 更新 Y 平面
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, textureIdY);
+        // 使用 glTexSubImage2D 更新現有紋理，比重新建立快
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, videoReader.width, videoReader.height, GL_LUMINANCE, GL_UNSIGNED_BYTE, videoReader.frame->data[0]);
 
         // 更新 U 平面 (寬高減半)
@@ -523,7 +563,7 @@ void GraphicsUpdate() {
     glClear(GL_COLOR_BUFFER_BIT);
     glViewport(0, 0, SCENE_WIDTH, SCENE_HEIGHT);
 
-    // 3. 綁定紋理單元並傳給 Shader
+    // 3. 綁定紋理單元並傳給 Shader (告知 Sampler 要用哪一層 Texture Unit)
     // Unit 0: Y
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, textureIdY);
@@ -539,19 +579,22 @@ void GraphicsUpdate() {
     glBindTexture(GL_TEXTURE_2D, textureIdV);
     glUniform1i(iLocTextureV, 2);
 
-    // Unit 3~7: 控制點 (原本是 1~5，現在往後順延)
+    // Unit 3~7: 控制點紋理 (佔用 Texture Unit 3 到 7)
     for (int i = 0; i < 5; i++) {
         glActiveTexture(GL_TEXTURE3 + i);
         glBindTexture(GL_TEXTURE_2D, controlPointTextureID[i]);
         glUniform1i(iLocControlPoint[i], 3 + i);
     }
 
-    // glUniform2fv(iLocFixedX, 5, (GLfloat*)FIXED_X);
+    // 傳送固定 X 軸亮度分界點
     glUniform1fv(iLocFixedX, 5, (GLfloat*)FIXED_X);
+    
+    // 繪製四邊形，觸發 Fragment Shader 運算
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
 int main(int argc, char* argv[]) {
+    // 參數檢查
     if (argc != 7) {
         printf("使用方法: %s <影片.mp4> <點1.bmp> <點2.bmp> <點3.bmp> <點4.bmp> <點5.bmp>\n", argv[0]);
         return 1;
@@ -559,11 +602,13 @@ int main(int argc, char* argv[]) {
 
     const char* controlFiles[5] = {argv[2], argv[3], argv[4], argv[5], argv[6]};
 
+    // 初始化視窗系統 (XLinuxPodium) 與 EGL
     XPodium *podium = XPodium::getHandler();
     podium->prepareWindow(SCENE_WIDTH, SCENE_HEIGHT);
     CoreEGL::initializeEGL(CoreEGL::OPENGLES2);
     eglMakeCurrent(CoreEGL::display, CoreEGL::surface, CoreEGL::surface, CoreEGL::context);
 
+    // 準備圖形資源 (紋理、Shader)
     if (!prepareGraphics(argv[1], controlFiles)) {
         printf("初始化失敗\n");
         return 1;
@@ -574,12 +619,15 @@ int main(int argc, char* argv[]) {
     bool end = false;
     int frame_count = 0;
 
+    // 主循環
     while (!end) {
         if (podium->checkWindow() != XPodium::WINDOW_IDLE) end = true;
 
         auto start_time = std::chrono::high_resolution_clock::now();
 
+        // 更新畫面
         GraphicsUpdate();
+        // 交換前後緩衝區 (顯示畫面)
         eglSwapBuffers(CoreEGL::display, CoreEGL::surface);
 
         frame_count++;
@@ -590,7 +638,7 @@ int main(int argc, char* argv[]) {
         printf("Frame: %d | Cost: %.3f ms\n", frame_count, elapsed);
     }
 
-    // 清理
+    // 清理資源
     glDeleteTextures(1, &textureIdY);
     glDeleteTextures(1, &textureIdU);
     glDeleteTextures(1, &textureIdV);
