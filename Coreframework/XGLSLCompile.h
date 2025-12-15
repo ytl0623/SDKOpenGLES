@@ -34,7 +34,8 @@
  *
  * @file XGLSLCompile.h
  *
- * This file implements all the functions related to GLSL compilation.
+ * 此檔案實作了所有與 GLSL (OpenGL著色語言) 編譯相關的功能。
+ * (This file implements all the functions related to GLSL compilation.)
  *
  * @note        None.
  *
@@ -55,11 +56,29 @@
 
 #include <GLES2/gl2.h>
 
-    class Shader
-    {
-    private:
-        static char *loadShader(const char *filename);
-    public:
-        static void processShader(GLuint *shader, const char *filename, GLint shaderType);
-    };
+/**
+ * @class Shader
+ * @brief 負責讀取、編譯與處理 GLSL 著色器的類別。
+ */
+class Shader
+{
+private:
+    /**
+     * @brief 讀取著色器原始碼檔案。
+     * * @param filename 著色器檔案的路徑。
+     * @return char* 回傳包含著色器原始碼的字串指標。
+     */
+    static char *loadShader(const char *filename);
+
+public:
+    /**
+     * @brief 處理並編譯著色器。
+     * 此函式會呼叫 loadShader 讀取檔案，接著建立並編譯著色器物件。
+     * * @param shader 指向 GLuint 的指標，用於存放編譯成功後的著色器 ID (Handle)。
+     * @param filename 著色器原始碼檔案的路徑。
+     * @param shaderType 著色器類型 (例如 GL_VERTEX_SHADER 或 GL_FRAGMENT_SHADER)。
+     */
+    static void processShader(GLuint *shader, const char *filename, GLint shaderType);
+};
+
 #endif /* XGLSLCOMPILE_H */
