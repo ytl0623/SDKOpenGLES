@@ -300,41 +300,47 @@
 //     float y = y_low + m * (x - x_low);
 
 //     // 確保輸出值在 [0, 1] 範圍內 (防止溢出)
-//     return (y < 0.0f) ? 0.0f : ((y > 1.0f) ? 1.0f : y);
+//     // return (y < 0.0f) ? 0.0f : ((y > 1.0f) ? 1.0f : y);
+//     return (y < 0.0) ? 0.0 : ((y > 1.0) ? 1.0 : y); // RTX 2070
 // }
 
 // void main() {
 //     // 1. 採樣原始圖片顏色
 //     vec3 inputColor = texture2D(uInputTexture, vTexCoord).rgb;
 
-//     // 2. 採樣 5 個控制點紋理的 R 值作為 Y 軸數值
-//     float y0_r = texture2D(uControlPoint0, vTexCoord).r;
-//     float y1_r = texture2D(uControlPoint1, vTexCoord).r;
-//     float y2_r = texture2D(uControlPoint2, vTexCoord).r;
-//     float y3_r = texture2D(uControlPoint3, vTexCoord).r;
-//     float y4_r = texture2D(uControlPoint4, vTexCoord).r;
+//     // 2. 採樣並修正 5 個控制點 (強制單調性)
 
-//     float y0_g = texture2D(uControlPoint0, vTexCoord).g;
-//     float y1_g = texture2D(uControlPoint1, vTexCoord).g;
-//     float y2_g = texture2D(uControlPoint2, vTexCoord).g;
-//     float y3_g = texture2D(uControlPoint3, vTexCoord).g;
-//     float y4_g = texture2D(uControlPoint4, vTexCoord).g;
+//     // --- R Channel ---
+//     // 修改宣告名稱為 r0 ~ r4 以配合後面的 if 邏輯
+//     float r0 = texture2D(uControlPoint0, vTexCoord).r;
+//     float r1 = texture2D(uControlPoint1, vTexCoord).r;
+//     float r2 = texture2D(uControlPoint2, vTexCoord).r;
+//     float r3 = texture2D(uControlPoint3, vTexCoord).r;
+//     float r4 = texture2D(uControlPoint4, vTexCoord).r;
 
-//     float y0_b = texture2D(uControlPoint0, vTexCoord).b;
-//     float y1_b = texture2D(uControlPoint1, vTexCoord).b;
-//     float y2_b = texture2D(uControlPoint2, vTexCoord).b;
-//     float y3_b = texture2D(uControlPoint3, vTexCoord).b;
-//     float y4_b = texture2D(uControlPoint4, vTexCoord).b;
+//     // --- G Channel ---
+//     float g0 = texture2D(uControlPoint0, vTexCoord).g;
+//     float g1 = texture2D(uControlPoint1, vTexCoord).g;
+//     float g2 = texture2D(uControlPoint2, vTexCoord).g;
+//     float g3 = texture2D(uControlPoint3, vTexCoord).g;
+//     float g4 = texture2D(uControlPoint4, vTexCoord).g;
 
-//     // 3. 執行插值 (加入原點邏輯)
-//     float newR = interpolate(inputColor.r, y0_r, y1_r, y2_r, y3_r, y4_r);
-//     float newG = interpolate(inputColor.g, y0_g, y1_g, y2_g, y3_g, y4_g);
-//     float newB = interpolate(inputColor.b, y0_b, y1_b, y2_b, y3_b, y4_b);
+//     // --- B Channel ---
+//     float b0 = texture2D(uControlPoint0, vTexCoord).b;
+//     float b1 = texture2D(uControlPoint1, vTexCoord).b;
+//     float b2 = texture2D(uControlPoint2, vTexCoord).b;
+//     float b3 = texture2D(uControlPoint3, vTexCoord).b;
+//     float b4 = texture2D(uControlPoint4, vTexCoord).b;
+
+//     // 3. 執行插值 (使用修正後的變數 r0~r4 等)
+//     float newR = interpolate(inputColor.r, r0, r1, r2, r3, r4);
+//     float newG = interpolate(inputColor.g, g0, g1, g2, g3, g4);
+//     float newB = interpolate(inputColor.b, b0, b1, b2, b3, b4);
 
 //     // 4. 輸出
-//     // RGBA
 //     gl_FragColor = vec4(newR, newG, newB, 1.0);
 // }
+
 // )";
 
 // // ============================================================================
@@ -1731,10 +1737,10 @@ const GLfloat vertexVertices[] = {
 };
 
 const GLfloat textureVertices[] = {
-    0.0f, 0.0f,  // 左下
-    1.0f, 0.0f,  // 右下
-    0.0f, 1.0f,  // 左上
-    1.0f, 1.0f   // 右上
+    0.0f, 1.0f,  // 左下
+    1.0f, 1.0f,  // 右下
+    0.0f, 0.0f,  // 左上
+    1.0f, 0.0f   // 右上
 };
 
 bool loadBMP(const char* filename, vector<unsigned char>& data, int& width, int& height) {
@@ -1886,42 +1892,46 @@ float interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
     float y = y_low + m * (x - x_low);
 
     // 確保輸出值在 [0, 1] 範圍內 (防止溢出)
-    return (y < 0.0f) ? 0.0f : ((y > 1.0f) ? 1.0f : y);
+    // return (y < 0.0f) ? 0.0f : ((y > 1.0f) ? 1.0f : y);
+    return (y < 0.0) ? 0.0 : ((y > 1.0) ? 1.0 : y); // RTX 2070
 }
 
 void main() {
+    // 1. 將 YUV 轉為 RGB 取得原始像素顏色
     vec3 inputColor = yuv2rgb(vTexCoord);
- 
-    // R Channel Controls
-    float y0_r = texture2D(uControlPoint0, vTexCoord).r;
-    float y1_r = texture2D(uControlPoint1, vTexCoord).r;
-    float y2_r = texture2D(uControlPoint2, vTexCoord).r;
-    float y3_r = texture2D(uControlPoint3, vTexCoord).r;
-    float y4_r = texture2D(uControlPoint4, vTexCoord).r;
 
-    // G Channel Controls
-    float y0_g = texture2D(uControlPoint0, vTexCoord).g;
-    float y1_g = texture2D(uControlPoint1, vTexCoord).g;
-    float y2_g = texture2D(uControlPoint2, vTexCoord).g;
-    float y3_g = texture2D(uControlPoint3, vTexCoord).g;
-    float y4_g = texture2D(uControlPoint4, vTexCoord).g;
+    // 2. 採樣 5 個控制點紋理，並修正名稱以便加入保護邏輯
 
-    // B Channel Controls
-    float y0_b = texture2D(uControlPoint0, vTexCoord).b;
-    float y1_b = texture2D(uControlPoint1, vTexCoord).b;
-    float y2_b = texture2D(uControlPoint2, vTexCoord).b;
-    float y3_b = texture2D(uControlPoint3, vTexCoord).b;
-    float y4_b = texture2D(uControlPoint4, vTexCoord).b;
+    // --- R Channel (紅色通道) ---
+    float r0 = texture2D(uControlPoint0, vTexCoord).r;
+    float r1 = texture2D(uControlPoint1, vTexCoord).r;
+    float r2 = texture2D(uControlPoint2, vTexCoord).r;
+    float r3 = texture2D(uControlPoint3, vTexCoord).r;
+    float r4 = texture2D(uControlPoint4, vTexCoord).r;
 
-    // 3. 執行插值補償
-    float newR = interpolate(inputColor.r, y0_r, y1_r, y2_r, y3_r, y4_r);
-    float newG = interpolate(inputColor.g, y0_g, y1_g, y2_g, y3_g, y4_g);
-    float newB = interpolate(inputColor.b, y0_b, y1_b, y2_b, y3_b, y4_b);
+    // --- G Channel (綠色通道) ---
+    float g0 = texture2D(uControlPoint0, vTexCoord).g;
+    float g1 = texture2D(uControlPoint1, vTexCoord).g;
+    float g2 = texture2D(uControlPoint2, vTexCoord).g;
+    float g3 = texture2D(uControlPoint3, vTexCoord).g;
+    float g4 = texture2D(uControlPoint4, vTexCoord).g;
 
+    // --- B Channel (藍色通道) ---
+    float b0 = texture2D(uControlPoint0, vTexCoord).b;
+    float b1 = texture2D(uControlPoint1, vTexCoord).b;
+    float b2 = texture2D(uControlPoint2, vTexCoord).b;
+    float b3 = texture2D(uControlPoint3, vTexCoord).b;
+    float b4 = texture2D(uControlPoint4, vTexCoord).b;
+
+    // 3. 執行插值補償 (使用修正後的變數 r0~r4 等)
+    float newR = interpolate(inputColor.r, r0, r1, r2, r3, r4);
+    float newG = interpolate(inputColor.g, g0, g1, g2, g3, g4);
+    float newB = interpolate(inputColor.b, b0, b1, b2, b3, b4);
 
     // 4. 輸出最終顏色
     gl_FragColor = vec4(newR, newG, newB, 1.0);
 }
+
 )";
 
 GLuint compileShader(GLenum type, const char* source) {
@@ -2092,7 +2102,8 @@ void GraphicsUpdate() {
         glUniform1i(iLocControlPoint[i], 3 + i);
     }
 
-    glUniform2fv(iLocFixedX, 5, (GLfloat*)FIXED_X);
+    // glUniform2fv(iLocFixedX, 5, (GLfloat*)FIXED_X);
+    glUniform1fv(iLocFixedX, 5, (GLfloat*)FIXED_X);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
