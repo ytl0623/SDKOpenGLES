@@ -123,11 +123,11 @@ int imageHeight = 0;
 // 定義 X 軸的 5 個固定節點 (標準化到 0.0 ~ 1.0)
 // 這些點將灰階值 (0~255) 分割成不同區間進行插值
 const float FIXED_X[5] = {
-    32.0f/255.0f,   // 約 0.125
-    64.0f/255.0f,   // 約 0.25
-    128.0f/255.0f,  // 約 0.5
-    192.0f/255.0f,  // 約 0.75
-    255.0f/255.0f   // 1.0
+    32.0f/255.0f,
+    64.0f/255.0f,
+    128.0f/255.0f,
+    192.0f/255.0f,
+    224.0f/255.0f
 };
 
 // 全螢幕四邊形 (Full Screen Quad) 的頂點資料
@@ -268,40 +268,44 @@ uniform float uFixedX[5];
 // 輸出: 校正後的亮度
 // ----------------------------------------------------------------------------
 float interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
-    float x0 = uFixedX[0];
-    float x1 = uFixedX[1];
-    float x2 = uFixedX[2];
-    float x3 = uFixedX[3];
-    float x4 = uFixedX[4];
+    float x0 = uFixedX[0]; // 32
+    float x1 = uFixedX[1]; // 64
+    float x2 = uFixedX[2]; // 128
+    float x3 = uFixedX[3]; // 192
+    float x4 = uFixedX[4]; // 224
 
     float x_low, x_high, y_low, y_high;
 
     // 搜尋 x 所在的區間 [x_low, x_high] 以及對應的 y 值
     if (x < x0) {
-        // [區間 1] 0 (全黑) 到 P0
-        x_low = 0.0;  y_low = 0.0; // 假設原點 (0,0) 固定
+        // [區間 1] 0 (全黑) 到 P0 (0 ~ 32)
+        x_low = 0.0;  y_low = 0.0; 
         x_high = x0;  y_high = y0;
     } else if (x < x1) {
-        // [區間 2] P0 到 P1
+        // [區間 2] P0 到 P1 (32 ~ 64)
         x_low = x0;   y_low = y0;
         x_high = x1;  y_high = y1;
     } else if (x < x2) {
-        // [區間 3] P1 到 P2
+        // [區間 3] P1 到 P2 (64 ~ 128)
         x_low = x1;   y_low = y1;
         x_high = x2;  y_high = y2;
     } else if (x < x3) {
-        // [區間 4] P2 到 P3
+        // [區間 4] P2 到 P3 (128 ~ 192)
         x_low = x2;   y_low = y2;
         x_high = x3;  y_high = y3;
-    } else {
-        // [區間 5] P3 到 P4 (通常是到 255)
+    } else if (x < x4) {
+        // [區間 5] P3 到 P4 (192 ~ 224)
         x_low = x3;   y_low = y3;
         x_high = x4;  y_high = y4;
+    } else {
+        // [區間 6] P4 到 255 (224 ~ 255)
+        x_low = x4;   y_low = y4;
+        x_high = 1.0; y_high = 1.0;
     }
 
     // 計算區間寬度
     float denominator = x_high - x_low;
-    // 防止除以零 (雖然理論上 x_high > x_low)
+    // 防止除以零
     if (denominator == 0.0) return y_high;
 
     // 計算斜率 (Slope)
@@ -310,7 +314,7 @@ float interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
     // 點斜式公式: y = y_start + slope * (x - x_start)
     float y = y_low + m * (x - x_low);
 
-    // 飽和度截斷 (Clamping): 確保輸出顏色在合法範圍 [0, 1]
+    // 飽和度截斷 (Clamping)
     return (y < 0.0) ? 0.0 : ((y > 1.0) ? 1.0 : y);
 }
 
