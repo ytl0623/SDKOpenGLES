@@ -89,7 +89,7 @@ def compare_bitmaps(img1_path, img2_path):
 
 if __name__ == "__main__":
     # 設定要比對的兩張圖
-    file_a = "cat.bmp"
-    file_b = "ori_cat.bmp"
+    file_a = "r192.bmp"
+    file_b = "Supportingfiles/1216/Correction-Red-192.bmp"
     
     compare_bitmaps(file_a, file_b)
