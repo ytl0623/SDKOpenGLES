@@ -44,4 +44,6 @@ source ../run_exports.sh
 ./YUV2RGBSample Supportingfiles/test/red_128.bmp Supportingfiles/finish_695_0301/Correction-Red-32.bmp Supportingfiles/finish_695_0301/Correction-Red-64.bmp Supportingfiles/finish_695_0301/Correction-Red-128.bmp Supportingfiles/finish_695_0301/Correction-Red-192.bmp Supportingfiles/finish_695_0301/Correction-Red-255.bmp
 
 // 1219
-./YUV2RGBSample Supportingfiles/test/red_128.bmp Supportingfiles/1216/Correction-Red-32.bmp Supportingfiles/1216/Correction-Red-64.bmp Supportingfiles/1216/Correction-Red-128.bmp Supportingfiles/1216/Correction-Red-192.bmp Supportingfiles/1216/Correction-Red-224.bmp
+./YUV2RGBSample Supportingfiles/test/red_192.bmp Supportingfiles/1216/Correction-Red-32.bmp Supportingfiles/1216/Correction-Red-64.bmp Supportingfiles/1216/Correction-Red-128.bmp Supportingfiles/1216/Correction-Red-192.bmp Supportingfiles/1216/Correction-Red-224.bmp
+
+./YUV2RGBSample Supportingfiles/red.mp4 Supportingfiles/1216/Correction-Gray-32.bmp Supportingfiles/1216/Correction-Gray-64.bmp Supportingfiles/1216/Correction-Gray-128.bmp Supportingfiles/1216/Correction-Gray-192.bmp Supportingfiles/1216/Correction-Gray-224.bmp
