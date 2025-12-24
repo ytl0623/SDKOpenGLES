@@ -184,7 +184,7 @@ const float FIXED_X[5] = {
     64.0f/255.0f,
     128.0f/255.0f,
     192.0f/255.0f,
-    255.0f/255.0f
+    224.0f/255.0f
 };
 
 // 頂點座標 (全螢幕四邊形)
@@ -335,35 +335,46 @@ float interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
     
     float x_low, x_high, y_low, y_high;
     
-    // 判斷 x 落在哪個區間，決定使用哪兩點進行插值
+    // 搜尋 x 所在的區間 [x_low, x_high] 以及對應的 y 值
     if (x < x0) {
-        x_low = 0.0;  y_low = 0.0; // 隱含的第 0 點 (黑電平)
+        // [區間 1] 0 (全黑) 到 P0 (0 ~ 32)
+        x_low = 0.0;  y_low = 0.0; 
         x_high = x0;  y_high = y0;
     } else if (x < x1) {
+        // [區間 2] P0 到 P1 (32 ~ 64)
         x_low = x0;   y_low = y0;
         x_high = x1;  y_high = y1;
     } else if (x < x2) {
+        // [區間 3] P1 到 P2 (64 ~ 128)
         x_low = x1;   y_low = y1;
         x_high = x2;  y_high = y2;
     } else if (x < x3) {
+        // [區間 4] P2 到 P3 (128 ~ 192)
         x_low = x2;   y_low = y2;
         x_high = x3;  y_high = y3;
-    } else {
+    } else if (x < x4) {
+        // [區間 5] P3 到 P4 (192 ~ 224)
         x_low = x3;   y_low = y3;
         x_high = x4;  y_high = y4;
+    } else {
+        // [區間 6] P4 到 255 (224 ~ 255)
+        x_low = x4;   y_low = y4;
+        x_high = 1.0; y_high = 1.0;
     }
     
+    // 計算區間寬度
     float denominator = x_high - x_low;
+    // 防止除以零
     if (denominator == 0.0) return y_high;
 
     // 計算斜率 m
     float m = (y_high - y_low) / denominator;
 
-    // 線性方程: y = y_low + m * (x - x_low)
+    // 點斜式公式: y = y_start + slope * (x - x_start)
     float y = y_low + m * (x - x_low);
 
-    // 確保輸出值在 [0, 1] 範圍內 (防止溢出)
-    return (y < 0.0) ? 0.0 : ((y > 1.0) ? 1.0 : y); 
+    // 飽和度截斷 (Clamping)
+    return (y < 0.0) ? 0.0 : ((y > 1.0) ? 1.0 : y);
 }
 
 void main() {
