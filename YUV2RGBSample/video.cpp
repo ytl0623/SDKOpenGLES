@@ -9,7 +9,7 @@
 #include <chrono>
 #include <stdio.h>
 #include <cmath>
-#include <thread> 
+#include <thread>
 
 extern "C" {
 #include <libavformat/avformat.h>
