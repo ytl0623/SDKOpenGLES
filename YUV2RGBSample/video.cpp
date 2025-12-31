@@ -618,6 +618,11 @@ int main(int argc, char* argv[]) {
     podium->prepareWindow(SCENE_WIDTH, SCENE_HEIGHT);
     CoreEGL::initializeEGL(CoreEGL::OPENGLES2);
     eglMakeCurrent(CoreEGL::display, CoreEGL::surface, CoreEGL::surface, CoreEGL::context);
+    
+    // 參數 1: 開啟 VSync (等待 1 個螢幕刷新週期)，消除畫面撕裂，FPS 會鎖定在 60
+    // 參數 0: 關閉 VSync (不等待)，FPS 最高，但會有撕裂 (鋸齒)
+    // ============================================================
+    eglSwapInterval(CoreEGL::display, 1);
 
     // 準備圖形資源 (紋理、Shader)
     if (!prepareGraphics(argv[1], controlFiles)) {
