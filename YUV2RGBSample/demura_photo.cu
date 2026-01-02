@@ -1,5 +1,5 @@
 // nvcc -O3 demura.cu -o demura_cuda
-// ./demura_cuda input.bmp cp0.bmp cp1.bmp cp2.bmp cp3.bmp cp4.bmp
+// ./demura_photo Supportingfiles/test/red_192.bmp Supportingfiles/1216/Correction-Red-32.bmp Supportingfiles/1216/Correction-Red-64.bmp Supportingfiles/1216/Correction-Red-128.bmp Supportingfiles/1216/Correction-Red-192.bmp Supportingfiles/1216/Correction-Red-224.bmp
 
 #include <cuda_runtime.h>
 #include <stdio.h>
