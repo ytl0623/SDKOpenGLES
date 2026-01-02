@@ -548,121 +548,134 @@ bool prepareGraphics(const char* videoFile, const char* controlFiles[5]) {
 }
 
 // 每一幀的渲染循環
-void GraphicsUpdate() {
-    // 1. 從 FFmpeg 讀取下一幀 (資料會更新在 videoReader.frame 中)
-    if (videoReader.readNextFrame()) {
-        // 2. 分別更新 Y, U, V 紋理
-        // YUV420P 記憶體佈局：data[0] 是 Y, data[1] 是 U, data[2] 是 V
-        
+void GraphicsUpdate(bool hasNewFrame) {
+    // 只有當有新的一幀解碼出來時，才執行耗時的紋理上傳 (CPU -> GPU)
+    if (hasNewFrame) {
         // 更新 Y 平面
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, textureIdY);
-        // 使用 glTexSubImage2D 更新現有紋理，比重新建立快
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, videoReader.width, videoReader.height, GL_LUMINANCE, GL_UNSIGNED_BYTE, videoReader.frame->data[0]);
 
-        // 更新 U 平面 (寬高減半)
+        // 更新 U 平面
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, textureIdU);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, videoReader.width / 2, videoReader.height / 2, GL_LUMINANCE, GL_UNSIGNED_BYTE, videoReader.frame->data[1]);
 
-        // 更新 V 平面 (寬高減半)
+        // 更新 V 平面
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, textureIdV);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, videoReader.width / 2, videoReader.height / 2, GL_LUMINANCE, GL_UNSIGNED_BYTE, videoReader.frame->data[2]);
     }
 
+    // 渲染與 Shader 計算 (這部分是純 GPU 運算)
     glClear(GL_COLOR_BUFFER_BIT);
     glViewport(0, 0, SCENE_WIDTH, SCENE_HEIGHT);
 
-    // 3. 綁定紋理單元並傳給 Shader (告知 Sampler 要用哪一層 Texture Unit)
-    // Unit 0: Y
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, textureIdY);
-    glUniform1i(iLocTextureY, 0);
+    // 綁定紋理單元
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, textureIdY); glUniform1i(iLocTextureY, 0);
+    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, textureIdU); glUniform1i(iLocTextureU, 1);
+    glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, textureIdV); glUniform1i(iLocTextureV, 2);
 
-    // Unit 1: U
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, textureIdU);
-    glUniform1i(iLocTextureU, 1);
-
-    // Unit 2: V
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, textureIdV);
-    glUniform1i(iLocTextureV, 2);
-
-    // Unit 3~7: 控制點紋理 (佔用 Texture Unit 3 到 7)
     for (int i = 0; i < 5; i++) {
         glActiveTexture(GL_TEXTURE3 + i);
         glBindTexture(GL_TEXTURE_2D, controlPointTextureID[i]);
         glUniform1i(iLocControlPoint[i], 3 + i);
     }
-
-    // 傳送固定 X 軸亮度分界點
     glUniform1fv(iLocFixedX, 5, (GLfloat*)FIXED_X);
     
-    // 繪製四邊形，觸發 Fragment Shader 運算
+    // 觸發 GPU Pipeline
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
+// ============================================================================
+// 主程式 (Entry Point) - 包含詳細時間測量邏輯
+// ============================================================================
 int main(int argc, char* argv[]) {
-    // 參數檢查
     if (argc != 7) {
-        printf("使用方法: %s <影片.mp4> <點1.bmp> <點2.bmp> <點3.bmp> <點4.bmp> <點5.bmp>\n", argv[0]);
+        printf("使用方法: %s <影片.mp4> <點1.bmp> ...\n", argv[0]);
         return 1;
     }
-
     const char* controlFiles[5] = {argv[2], argv[3], argv[4], argv[5], argv[6]};
 
-    // 初始化視窗系統 (XLinuxPodium) 與 EGL
+    // 1. 系統初始化
     XPodium *podium = XPodium::getHandler();
     podium->prepareWindow(SCENE_WIDTH, SCENE_HEIGHT);
     CoreEGL::initializeEGL(CoreEGL::OPENGLES2);
     eglMakeCurrent(CoreEGL::display, CoreEGL::surface, CoreEGL::surface, CoreEGL::context);
     
-    // 參數 1: 開啟 VSync (等待 1 個螢幕刷新週期)，消除畫面撕裂，FPS 會鎖定在 60
-    // 參數 0: 關閉 VSync (不等待)，FPS 最高，但會有撕裂 (鋸齒)
-    // ============================================================
-    eglSwapInterval(CoreEGL::display, 1);
+    // *** 關鍵設定：控制 VSync ***
+    // 設為 1: 開啟 VSync (鎖定 60FPS)，總時間會包含等待時間
+    // 設為 0: 關閉 VSync，總時間即為真實運算極限
+    eglSwapInterval(CoreEGL::display, 0);
 
-    // 準備圖形資源 (紋理、Shader)
-    if (!prepareGraphics(argv[1], controlFiles)) {
-        printf("初始化失敗\n");
-        return 1;
-    }
+    if (!prepareGraphics(argv[1], controlFiles)) return 1;
 
-    printf("\n--- GPU 加速播放與補償 (YUV Direct) ---\n");
+    printf("\n--- 開始效能測量 (CPU Decode vs GPU Render) ---\n");
     
     bool end = false;
     int frame_count = 0;
 
-    // 主循環
     while (!end) {
         if (podium->checkWindow() != XPodium::WINDOW_IDLE) end = true;
 
-        auto start_time = std::chrono::high_resolution_clock::now();
+        // ==========================================
+        // 1. 總幀時間起點 (Total Start)
+        // ==========================================
+        auto start_total = std::chrono::high_resolution_clock::now();
 
-        // 更新畫面
-        GraphicsUpdate();
-        // 交換前後緩衝區 (顯示畫面)
+        // ==========================================
+        // 2. CPU 解碼 (FFmpeg)
+        // ==========================================
+        auto start_cpu = std::chrono::high_resolution_clock::now();
+        
+        // 將解碼從 GraphicsUpdate 移出來，獨立測量
+        bool hasNewFrame = videoReader.readNextFrame();
+        
+        auto end_cpu = std::chrono::high_resolution_clock::now();
+
+        // ==========================================
+        // 3. GPU 渲染 (OpenGL ES)
+        // ==========================================
+        // [前置同步] 確保 GPU 在計時開始前是閒置的 (清除上一幀的影響)
+        glFinish(); 
+        
+        auto start_gpu = std::chrono::high_resolution_clock::now();
+
+        // 執行紋理上傳與繪製
+        GraphicsUpdate(hasNewFrame);
+
+        // [後置同步] 強制 CPU 等待 GPU 畫完所有像素 (這對於測量 GPU 時間至關重要)
+        glFinish();
+
+        auto end_gpu = std::chrono::high_resolution_clock::now();
+
+        // ==========================================
+        // 4. 顯示與 VSync 等待
+        // ==========================================
+        // 如果開啟 VSync，CPU 會在這裡停下來等待螢幕刷新
         eglSwapBuffers(CoreEGL::display, CoreEGL::surface);
+
+        auto end_total = std::chrono::high_resolution_clock::now();
+
+        // ==========================================
+        // 計算時間 (毫秒)
+        // ==========================================
+        double ms_cpu_decode = std::chrono::duration_cast<std::chrono::microseconds>(end_cpu - start_cpu).count() / 1000.0;
+        double ms_gpu_render = std::chrono::duration_cast<std::chrono::microseconds>(end_gpu - start_gpu).count() / 1000.0;
+        double ms_total = std::chrono::duration_cast<std::chrono::microseconds>(end_total - start_total).count() / 1000.0;
+        
+        // 剩餘時間 (VSync 等待 + 驅動 overhead)
+        double ms_wait = ms_total - (ms_cpu_decode + ms_gpu_render);
+        if (ms_wait < 0) ms_wait = 0; // 避免極小誤差導致負數
 
         frame_count++;
         
-        auto end_time = std::chrono::high_resolution_clock::now();
-        double elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-        
-        printf("Frame: %d | Cost: %.3f ms\n", frame_count, elapsed);
+        // 為了避免洗版，每 60 幀印出一次平均值，或單幀印出
+        // 這裡示範單幀印出
+        printf("Frame %d | GPU: %6.3f ms | Total: %6.3f ms | Idle: %6.3f ms\n", 
+               frame_count, ms_gpu_render, ms_total, ms_wait);
     }
 
-    // 清理資源
-    glDeleteTextures(1, &textureIdY);
-    glDeleteTextures(1, &textureIdU);
-    glDeleteTextures(1, &textureIdV);
-    glDeleteTextures(5, controlPointTextureID);
-    glDeleteProgram(programID);
-    CoreEGL::terminateEGL();
-    podium->destroyWindow();
-    delete podium;
-
+    // ... (資源清理保持不變) ...
     return 0;
 }

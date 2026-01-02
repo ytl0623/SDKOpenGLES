@@ -182,7 +182,7 @@ int main(int argc, char* argv[]) {
     int width, height;
     std::vector<unsigned char> h_input, h_cp[5];
 
-    // 1. 載入圖片到 Host Memory
+    // 1. 載入圖片 (Disk I/O 不算在 GPU 效能內)
     printf("Loading Images...\n");
     if (!loadBMP(argv[1], h_input, width, height)) return 1;
     for (int i = 0; i < 5; i++) {
@@ -196,55 +196,95 @@ int main(int argc, char* argv[]) {
     size_t imgSize = width * height * 3 * sizeof(unsigned char);
     std::vector<unsigned char> h_output(imgSize);
 
-    // 2. 分配 Device Memory
+    // 2. 分配 Device Memory (通常在程式初始化做一次，不計入單幀時間)
     unsigned char *d_input, *d_output, *d_cp[5];
     checkCuda(cudaMalloc(&d_input, imgSize));
     checkCuda(cudaMalloc(&d_output, imgSize));
     for(int i=0; i<5; i++) checkCuda(cudaMalloc(&d_cp[i], imgSize));
 
-    // 3. 複製資料 Host -> Device
+    // ==========================================
+    //  準備計時器
+    // ==========================================
+    cudaEvent_t startTotal, stopTotal;  // 計算總流程 (Copy + Kernel)
+    cudaEvent_t startKernel, stopKernel; // 計算純核心 (Kernel Only)
+    
+    checkCuda(cudaEventCreate(&startTotal));
+    checkCuda(cudaEventCreate(&stopTotal));
+    checkCuda(cudaEventCreate(&startKernel));
+    checkCuda(cudaEventCreate(&stopKernel));
+
+    printf("Processing on GPU (%dx%d)...\n", width, height);
+
+    // ==========================================
+    //  開始測量：總流程時間 (Start Total)
+    // ==========================================
+    checkCuda(cudaEventRecord(startTotal));
+
+    // A. 複製資料 Host -> Device (H2D)
     checkCuda(cudaMemcpy(d_input, h_input.data(), imgSize, cudaMemcpyHostToDevice));
     for(int i=0; i<5; i++) {
         checkCuda(cudaMemcpy(d_cp[i], h_cp[i].data(), imgSize, cudaMemcpyHostToDevice));
     }
 
-    // 4. 設定 Kernel 執行參數
-    dim3 blockSize(16, 16); // 每個 Block 16x16 threads
+    // 設定 Grid/Block
+    dim3 blockSize(16, 16);
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x, 
                   (height + blockSize.y - 1) / blockSize.y);
 
-    printf("Processing on GPU (%dx%d)...\n", width, height);
-    
-    // 建立事件以計算時間
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
+    // ==========================================
+    //  開始測量：Kernel 時間 (Start Kernel)
+    // ==========================================
+    checkCuda(cudaEventRecord(startKernel));
 
-    cudaEventRecord(start);
-    
-    // 啟動 Kernel
+    // B. 啟動 Kernel
     demuraKernel<<<gridSize, blockSize>>>(
         d_input, d_cp[0], d_cp[1], d_cp[2], d_cp[3], d_cp[4], 
         d_output, width, height
     );
     
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop); // 等待 GPU 完成
+    // ==========================================
+    //  停止測量：Kernel 時間 (Stop Kernel)
+    // ==========================================
+    checkCuda(cudaEventRecord(stopKernel));
 
-    float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    printf("GPU Time: %.3f ms\n", milliseconds);
-
-    // 5. 複製結果 Device -> Host
+    // C. 複製結果 Device -> Host (D2H)
+    // 注意：cudaMemcpy 會隱式同步，但為了 event 計時準確，我們把它包在裡面
     checkCuda(cudaMemcpy(h_output.data(), d_output, imgSize, cudaMemcpyDeviceToHost));
+
+    // ==========================================
+    //  停止測量：總流程時間 (Stop Total)
+    // ==========================================
+    checkCuda(cudaEventRecord(stopTotal));
+    
+    // 等待 GPU 完成所有工作以便計算時間
+    checkCuda(cudaEventSynchronize(stopTotal));
+
+    // ==========================================
+    //  計算並顯示結果
+    // ==========================================
+    float msKernel = 0, msTotal = 0;
+    cudaEventElapsedTime(&msKernel, startKernel, stopKernel);
+    cudaEventElapsedTime(&msTotal, startTotal, stopTotal);
+
+    printf("--------------------------------------------------\n");
+    printf(" [效能分析]\n");
+    printf(" 1. 純運算時間 (Kernel Time):  %8.3f ms\n", msKernel);
+    printf(" 2. 總執行時間 (Total Time):   %8.3f ms (含 PCIe 傳輸)\n", msTotal);
+    printf(" --------------------------------------------------\n");
+    printf(" 資料傳輸耗時 (Overhead):      %8.3f ms (佔比 %.1f%%)\n", 
+           msTotal - msKernel, 
+           ((msTotal - msKernel) / msTotal) * 100.0f);
+    printf("--------------------------------------------------\n");
 
     // 6. 儲存結果
     saveBMP("output_cuda.bmp", h_output.data(), width, height);
 
-    // 7. 釋放記憶體
+    // 7. 釋放資源
     cudaFree(d_input);
     cudaFree(d_output);
     for(int i=0; i<5; i++) cudaFree(d_cp[i]);
+    cudaEventDestroy(startTotal); cudaEventDestroy(stopTotal);
+    cudaEventDestroy(startKernel); cudaEventDestroy(stopKernel);
     
     return 0;
 }

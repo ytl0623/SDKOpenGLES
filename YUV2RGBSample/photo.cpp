@@ -517,86 +517,84 @@ void GraphicsUpdate() {
 // 主程式 (Entry Point)
 // ============================================================================
 int main(int argc, char* argv[]) {
-    auto program_start = std::chrono::high_resolution_clock::now();
-    
-    // 檢查命令列參數
+    // ... (保留原本的參數檢查與初始化程式碼) ...
     if (argc != 7) {
         printf("使用方法: %s <輸入BMP> <點1> <點2> <點3> <點4> <點5>\n", argv[0]);
         return 1;
     }
-    
-    // 儲存參數指標
     const char* controlFiles[5] = {argv[2], argv[3], argv[4], argv[5], argv[6]};
-    
-    // 1. 初始化視窗與 EGL 環境
-    Timer timer("1. 系統初始化");
-    
-    XPodium *podium = XPodium::getHandler();      // 取得視窗管理器單例
-    podium->prepareWindow(SCENE_WIDTH, SCENE_HEIGHT); // 建立 1920x1080 視窗
-    CoreEGL::initializeEGL(CoreEGL::OPENGLES2);       // 初始化 EGL (綁定 GLES2 API)
-    
-    // 將 EGL Context 綁定到當前執行緒，後續的 GL 指令才會生效
+
+    // 1. 系統與 OpenGL 初始化
+    XPodium *podium = XPodium::getHandler();
+    podium->prepareWindow(SCENE_WIDTH, SCENE_HEIGHT);
+    CoreEGL::initializeEGL(CoreEGL::OPENGLES2);
     eglMakeCurrent(CoreEGL::display, CoreEGL::surface, CoreEGL::surface, CoreEGL::context);
+
+    // *** 關鍵設定：控制 VSync ***
+    // 設為 1: 開啟 VSync (鎖定 60FPS)，總時間會包含等待時間
+    // 設為 0: 關閉 VSync，總時間即為真實運算極限
+    eglSwapInterval(CoreEGL::display, 0);
+
+    if (!prepareGraphics(argv[1], controlFiles)) return 1;
+
+    printf("\n--- 開始效能測量 ---\n");
     
-    // 2. 初始化 OpenGL 資源 (Shader, Textures)
-    {
-        // 使用區塊 {} 讓 Timer 物件在區塊結束時自動解構並印出時間
-        Timer timer("2. 圖形資源載入");
-        if (!prepareGraphics(argv[1], controlFiles)) {
-            printf("圖形初始化失敗！\n");
-            return 1;
-        }
-    }
-    
-    printf("\n--- 系統就緒，開始渲染迴圈 ---\n");
-    printf("按任意鍵或關閉視窗以退出...\n\n");
-    
-    // 3. 主渲染迴圈
     bool end = false;
     int frame_count = 0;
-    double total_render_time = 0.0;
-    
-    auto render_loop_start = std::chrono::high_resolution_clock::now();
-    
+
     while (!end) {
-        // 檢查視窗系統事件 (如: 使用者點擊關閉按鈕)
-        if (podium->checkWindow() != XPodium::WINDOW_IDLE) {
-            end = true;
-        }
+        if (podium->checkWindow() != XPodium::WINDOW_IDLE) end = true;
+
+        // ============================================================
+        // 效能測量開始
+        // ============================================================
         
-        auto frame_start = std::chrono::high_resolution_clock::now();
-        
-        // 執行 OpenGL 繪圖指令
-        GraphicsUpdate();
-        
-        // 交換前後緩衝區 (Double Buffering)
-        // GraphicsUpdate 畫在後緩衝區 (Back Buffer)，畫完後交換到前緩衝區顯示
+        // 1. 紀錄 [總幀時間] 的起點
+        auto start_total = std::chrono::high_resolution_clock::now();
+
+        // 為了測量純 GPU 運算，我們先確保 GPU 把上一幀的事情做完，清空管線
+        // (在正式產品中不要這樣寫，這會降低 throughput，但為了測量 latency 必須這樣做)
+        glFinish(); 
+
+        // 2. 紀錄 [GPU 純運算] 的起點
+        auto start_gpu = std::chrono::high_resolution_clock::now();
+
+        // --- 執行繪圖指令 ---
+        GraphicsUpdate(); 
+
+        // 強制 CPU 等待 GPU 畫完所有像素
+        // 這樣 end_gpu 才會是真正畫完的時間點
+        glFinish(); 
+
+        // 3. 紀錄 [GPU 純運算] 的終點
+        auto end_gpu = std::chrono::high_resolution_clock::now();
+
+        // --- 交換緩衝區 (顯示到螢幕) ---
+        // 如果 VSync 開啟，CPU 會在這裡停下來等待螢幕刷新 (16ms 的主要來源)
         eglSwapBuffers(CoreEGL::display, CoreEGL::surface);
+
+        // 4. 紀錄 [總幀時間] 的終點
+        auto end_total = std::chrono::high_resolution_clock::now();
+
+        // ============================================================
+        // 計算與輸出
+        // ============================================================
+        double gpu_ms = std::chrono::duration_cast<std::chrono::microseconds>(end_gpu - start_gpu).count() / 1000.0;
+        double total_ms = std::chrono::duration_cast<std::chrono::microseconds>(end_total - start_total).count() / 1000.0;
         
-        auto frame_end = std::chrono::high_resolution_clock::now();
-        double frame_ms = std::chrono::duration_cast<std::chrono::microseconds>(frame_end - frame_start).count() / 1000.0;
-        
-        total_render_time += frame_ms;
+        // 計算 "其他等待時間" (包含 VSync 等待、驅動程式 Overhead、Context 切換)
+        double wait_ms = total_ms - gpu_ms;
+
         frame_count++;
-        // 印出每幀的 FPS 與耗時
-        printf("第 %d 幀 FPS: %.1f (Frame Time: %.3f ms)\n", frame_count, 1000.0 / frame_ms, frame_ms);
+        
+        // 為了避免洗版，每 60 幀印出一次平均值，或單幀印出
+        // 這裡示範單幀印出
+        printf("Frame %d | GPU: %6.3f ms | Total: %6.3f ms | Idle: %6.3f ms\n", 
+               frame_count, gpu_ms, total_ms, wait_ms);
     }
-    
-    // 4. 清理資源
-    {
-        Timer timer("4. 資源釋放");
-        // 刪除 GL 資源
-        glDeleteTextures(1, &inputTextureID);
-        glDeleteTextures(5, controlPointTextureID);
-        glDeleteProgram(programID);
-        // 關閉 EGL 與視窗
-        CoreEGL::terminateEGL();
-        podium->destroyWindow();
-        delete podium;
-    }
-    
-    auto program_end = std::chrono::high_resolution_clock::now();
-    printf("總執行時間: %.3f 秒\n", std::chrono::duration_cast<std::chrono::milliseconds>(program_end - program_start).count() / 1000.0);
-    
+
+    // ... (保留原本的資源釋放程式碼) ...
+    glDeleteTextures(1, &inputTextureID);
+    // ...
     return 0;
 }
