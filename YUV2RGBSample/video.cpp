@@ -22,7 +22,7 @@ extern "C" {
 #include "XEGLIntf.h"
 
 #define SCENE_WIDTH 1920
-#define SCENE_HEIGHT 1080
+#define SCENE_HEIGHT 900
 
 using std::string;
 using std::vector;
@@ -165,7 +165,7 @@ GLint iLocTextureU = -1;
 GLint iLocTextureV = -1;
 
 // 控制點紋理與參數
-GLint iLocControlPoint[5];
+GLint iLocControlPoint[4];
 GLint iLocFixedX = -1;
 
 // 修改：需要 3 個紋理 ID 來儲存 Y, U, V 數據
@@ -173,18 +173,17 @@ GLuint textureIdY;
 GLuint textureIdU;
 GLuint textureIdV;
 
-GLuint controlPointTextureID[5];
+GLuint controlPointTextureID[4];
 
 int imageWidth = 1920;
-int imageHeight = 1080;
+int imageHeight = 900;
 
-// 定義 5 個控制點的 X 軸亮度分佈 (0~1 之間)
-const float FIXED_X[5] = {
-    32.0f/255.0f,
+// 定義 4 個控制點的 X 軸亮度分佈 (0~1 之間)
+const float FIXED_X[4] = {
     64.0f/255.0f,
+    95.0f/255.0f,
     128.0f/255.0f,
-    192.0f/255.0f,
-    224.0f/255.0f
+    156.0f/255.0f
 };
 
 // 頂點座標 (全螢幕四邊形)
@@ -285,7 +284,7 @@ void main() {
 // ============================================================================
 // Fragment Shader (片段著色器) - 核心邏輯
 // 用途：1. 將 YUV 轉為 RGB 
-//       2. 讀取 5 張控制點圖
+//       2. 讀取 4 張控制點圖
 //       3. 根據當前像素亮度進行分段線性插值 (De-mura 補償)
 // ============================================================================
 const char* fragmentShaderSource = R"(
@@ -302,10 +301,9 @@ uniform sampler2D uControlPoint0;
 uniform sampler2D uControlPoint1;
 uniform sampler2D uControlPoint2;
 uniform sampler2D uControlPoint3;
-uniform sampler2D uControlPoint4;
 
 // X軸座標定義 (亮度分界點)
-uniform float uFixedX[5];
+uniform float uFixedX[4];
 
 // --- YUV 轉 RGB 函數 ---
 // 使用 BT.709 標準 (適用於 HDTV/MP4 1920x1080)
@@ -325,96 +323,72 @@ vec3 yuv2rgb(vec2 uv) {
 
 // 分段線性插值函數 (含原點 0,0 錨定邏輯)
 // x: 輸入的原始亮度值 (R, G, 或 B)
-// y0~y4: 該像素位置在 5 張控制圖上的補償目標值
-float interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
-    float x0 = uFixedX[0];
-    float x1 = uFixedX[1];
-    float x2 = uFixedX[2];
-    float x3 = uFixedX[3];
-    float x4 = uFixedX[4];
+// y0~y4: 該像素位置在 4 張控制圖上的補償目標值
+float interpolate(float x, float y0, float y1, float y2, float y3) {
+    float x0 = uFixedX[0]; // 64
+    float x1 = uFixedX[1]; // 95
+    float x2 = uFixedX[2]; // 128
+    float x3 = uFixedX[3]; // 156
     
     float x_low, x_high, y_low, y_high;
     
-    // 搜尋 x 所在的區間 [x_low, x_high] 以及對應的 y 值
     if (x < x0) {
-        // [區間 1] 0 (全黑) 到 P0 (0 ~ 32)
+        // [Interval 1] 0 -> P0 (0 ~ 64)
         x_low = 0.0;  y_low = 0.0; 
         x_high = x0;  y_high = y0;
     } else if (x < x1) {
-        // [區間 2] P0 到 P1 (32 ~ 64)
+        // [Interval 2] P0 -> P1 (64 ~ 95)
         x_low = x0;   y_low = y0;
         x_high = x1;  y_high = y1;
     } else if (x < x2) {
-        // [區間 3] P1 到 P2 (64 ~ 128)
+        // [Interval 3] P1 -> P2 (95 ~ 128)
         x_low = x1;   y_low = y1;
         x_high = x2;  y_high = y2;
     } else if (x < x3) {
-        // [區間 4] P2 到 P3 (128 ~ 192)
+        // [Interval 4] P2 -> P3 (128 ~ 156)
         x_low = x2;   y_low = y2;
         x_high = x3;  y_high = y3;
-    } else if (x < x4) {
-        // [區間 5] P3 到 P4 (192 ~ 224)
-        x_low = x3;   y_low = y3;
-        x_high = x4;  y_high = y4;
     } else {
-        // [區間 6] P4 到 255 (224 ~ 255)
-        x_low = x4;   y_low = y4;
+        // [Interval 5] P3 -> 255 (156 ~ 255)
+        x_low = x3;   y_low = y3;
         x_high = 1.0; y_high = 1.0;
     }
     
-    // 計算區間寬度
     float denominator = x_high - x_low;
-    // 防止除以零
     if (denominator == 0.0) return y_high;
 
-    // 計算斜率 m
     float m = (y_high - y_low) / denominator;
-
-    // 點斜式公式: y = y_start + slope * (x - x_start)
     float y = y_low + m * (x - x_low);
 
-    // 飽和度截斷 (Clamping)
     return (y < 0.0) ? 0.0 : ((y > 1.0) ? 1.0 : y);
 }
 
 void main() {
-    // 1. 將 YUV 轉為 RGB 取得原始像素顏色
     vec3 inputColor = yuv2rgb(vTexCoord);
 
-    // 2. 採樣 5 個控制點紋理
-    // 分別取得該像素在不同亮度等級下的補償值 (Texture Lookup)
-    
-    // --- R Channel (紅色通道) ---
+    // Sample 4 control textures
     float r0 = texture2D(uControlPoint0, vTexCoord).r;
     float r1 = texture2D(uControlPoint1, vTexCoord).r;
     float r2 = texture2D(uControlPoint2, vTexCoord).r;
     float r3 = texture2D(uControlPoint3, vTexCoord).r;
-    float r4 = texture2D(uControlPoint4, vTexCoord).r;
 
-    // --- G Channel (綠色通道) ---
     float g0 = texture2D(uControlPoint0, vTexCoord).g;
     float g1 = texture2D(uControlPoint1, vTexCoord).g;
     float g2 = texture2D(uControlPoint2, vTexCoord).g;
     float g3 = texture2D(uControlPoint3, vTexCoord).g;
-    float g4 = texture2D(uControlPoint4, vTexCoord).g;
 
-    // --- B Channel (藍色通道) ---
     float b0 = texture2D(uControlPoint0, vTexCoord).b;
     float b1 = texture2D(uControlPoint1, vTexCoord).b;
     float b2 = texture2D(uControlPoint2, vTexCoord).b;
     float b3 = texture2D(uControlPoint3, vTexCoord).b;
-    float b4 = texture2D(uControlPoint4, vTexCoord).b;
 
-    // 3. 執行插值補償
-    // 根據原始輸入值 (inputColor.r/g/b) 與控制點 (r0~r4 等) 計算最終輸出
-    float newR = interpolate(inputColor.r, r0, r1, r2, r3, r4);
-    float newG = interpolate(inputColor.g, g0, g1, g2, g3, g4);
-    float newB = interpolate(inputColor.b, b0, b1, b2, b3, b4);
+    // Interpolate using 4 points
+    float newR = interpolate(inputColor.r, r0, r1, r2, r3);
+    float newG = interpolate(inputColor.g, g0, g1, g2, g3);
+    float newB = interpolate(inputColor.b, b0, b1, b2, b3);
 
-    // 4. 輸出最終顏色
     gl_FragColor = vec4(newR, newG, newB, 1.0);
 }
-
 )";
 
 // 編譯 Shader 的輔助函式
@@ -441,15 +415,15 @@ GLuint compileShader(GLenum type, const char* source) {
 }
 
 // 初始化圖形資源：讀取影片、讀取控制圖、編譯 Shader、建立紋理
-bool prepareGraphics(const char* videoFile, const char* controlFiles[5]) {
+bool prepareGraphics(const char* videoFile, const char* controlFiles[4]) {
     // 1. 初始化影片讀取器
     if (!videoReader.open(videoFile)) {
         return false;
     }
     
-    // 2. 讀取 5 張 BMP 控制圖
-    vector<unsigned char> controlData[5];
-    for (int i = 0; i < 5; i++) {
+    // 2. 讀取 4 張 BMP 控制圖
+    vector<unsigned char> controlData[4];
+    for (int i = 0; i < 4; i++) {
         int w, h;
         if (!loadBMP(controlFiles[i], controlData[i], w, h)) {
             return false;
@@ -488,7 +462,6 @@ bool prepareGraphics(const char* videoFile, const char* controlFiles[5]) {
     iLocControlPoint[1] = glGetUniformLocation(programID, "uControlPoint1");
     iLocControlPoint[2] = glGetUniformLocation(programID, "uControlPoint2");
     iLocControlPoint[3] = glGetUniformLocation(programID, "uControlPoint3");
-    iLocControlPoint[4] = glGetUniformLocation(programID, "uControlPoint4");
     
     iLocFixedX = glGetUniformLocation(programID, "uFixedX");
 
@@ -528,7 +501,7 @@ bool prepareGraphics(const char* videoFile, const char* controlFiles[5]) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     // 7. 建立控制點紋理並上傳資料 (靜態圖，只傳一次)
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 4; i++) {
         glGenTextures(1, &controlPointTextureID[i]);
         glBindTexture(GL_TEXTURE_2D, controlPointTextureID[i]);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, imageWidth, imageHeight, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, &controlData[i][0]);
@@ -576,12 +549,12 @@ void GraphicsUpdate(bool hasNewFrame) {
     glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, textureIdU); glUniform1i(iLocTextureU, 1);
     glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, textureIdV); glUniform1i(iLocTextureV, 2);
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 4; i++) {
         glActiveTexture(GL_TEXTURE3 + i);
         glBindTexture(GL_TEXTURE_2D, controlPointTextureID[i]);
         glUniform1i(iLocControlPoint[i], 3 + i);
     }
-    glUniform1fv(iLocFixedX, 5, (GLfloat*)FIXED_X);
+    glUniform1fv(iLocFixedX, 4, (GLfloat*)FIXED_X);
     
     // 觸發 GPU Pipeline
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -591,11 +564,11 @@ void GraphicsUpdate(bool hasNewFrame) {
 // 主程式 (Entry Point) - 包含詳細時間測量邏輯
 // ============================================================================
 int main(int argc, char* argv[]) {
-    if (argc != 7) {
+    if (argc != 6) {
         printf("使用方法: %s <影片.mp4> <點1.bmp> ...\n", argv[0]);
         return 1;
     }
-    const char* controlFiles[5] = {argv[2], argv[3], argv[4], argv[5], argv[6]};
+    const char* controlFiles[4] = {argv[2], argv[3], argv[4], argv[5]};
 
     // 1. 系統初始化
     XPodium *podium = XPodium::getHandler();
@@ -606,7 +579,7 @@ int main(int argc, char* argv[]) {
     // *** 關鍵設定：控制 VSync ***
     // 設為 1: 開啟 VSync (鎖定 60FPS)，總時間會包含等待時間
     // 設為 0: 關閉 VSync，總時間即為真實運算極限
-    eglSwapInterval(CoreEGL::display, 0);
+    eglSwapInterval(CoreEGL::display, 1);
 
     if (!prepareGraphics(argv[1], controlFiles)) return 1;
 

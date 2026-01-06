@@ -23,7 +23,7 @@
 // ============================================================================
 // 定義場景視窗的解析度 (Full HD)
 #define SCENE_WIDTH 1920
-#define SCENE_HEIGHT 1080
+#define SCENE_HEIGHT 900
 
 using std::string;
 using std::vector;
@@ -109,25 +109,24 @@ GLint iLocTexCoord = -1;      // 紋理屬性位置 (aTexCoord)
 
 // Uniform Locations: 用於從 C++ 傳送數據到 Shader
 GLint iLocInputTexture = -1;                  // 原始影像紋理單元索引
-GLint iLocControlPoint[5] = {-1, -1, -1, -1, -1}; // 5個控制點紋理單元索引
+GLint iLocControlPoint[4] = {-1, -1, -1, -1}; // 4個控制點紋理單元索引
 GLint iLocFixedX = -1;                        // X 軸分割點座標陣列
 
 // OpenGL Texture Objects (紋理物件 ID)
 GLuint inputTextureID;           // 輸入影像
-GLuint controlPointTextureID[5]; // 5張控制圖 (Spatial Correction Maps)
+GLuint controlPointTextureID[4]; // 4張控制圖 (Spatial Correction Maps)
 
 // 圖片尺寸 (全域記錄，假設所有圖片尺寸相同)
 int imageWidth = 0;
 int imageHeight = 0;
 
-// 定義 X 軸的 5 個固定節點 (標準化到 0.0 ~ 1.0)
+// 定義 X 軸的 4 個固定節點 (標準化到 0.0 ~ 1.0)
 // 這些點將灰階值 (0~255) 分割成不同區間進行插值
-const float FIXED_X[5] = {
-    32.0f/255.0f,
+const float FIXED_X[4] = {
     64.0f/255.0f,
+    95.0f/255.0f,
     128.0f/255.0f,
-    192.0f/255.0f,
-    224.0f/255.0f
+    156.0f/255.0f
 };
 
 // 全螢幕四邊形 (Full Screen Quad) 的頂點資料
@@ -243,7 +242,7 @@ void main() {
 // 負責計算每個像素的最終顏色。
 // 演算法邏輯：空間變異的色彩校正 (Spatially Varying Color Correction)
 // 1. 讀取原始影像的顏色 (inputColor)
-// 2. 在相同位置讀取 5 張控制圖 (Control Points)，代表在不同亮度等級下的校正目標值。
+// 2. 在相同位置讀取 4 張控制圖 (Control Points)，代表在不同亮度等級下的校正目標值。
 // 3. 根據 inputColor 的亮度，在這些控制點之間進行線性插值，算出最終顏色。
 const char* fragmentShaderSource = R"(
 precision highp float;      // 宣告浮點數精度，避免手機 GPU 上精度不足
@@ -256,103 +255,80 @@ uniform sampler2D uInputTexture;    // 原始影像
 uniform sampler2D uControlPoint0;   
 uniform sampler2D uControlPoint1;   
 uniform sampler2D uControlPoint2;   
-uniform sampler2D uControlPoint3;   
-uniform sampler2D uControlPoint4;   
+uniform sampler2D uControlPoint3; 
 
 // X軸的分段點 (Input Level)
-uniform float uFixedX[5]; 
+uniform float uFixedX[4]; 
 
 // ----------------------------------------------------------------------------
 // 函數: 分段線性插值 (Piecewise Linear Interpolation)
 // 輸入: x (原始亮度), y0~y4 (該像素在不同亮度級距下的校正目標值)
 // 輸出: 校正後的亮度
 // ----------------------------------------------------------------------------
-float interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
-    float x0 = uFixedX[0]; // 32
-    float x1 = uFixedX[1]; // 64
+float interpolate(float x, float y0, float y1, float y2, float y3) {
+    float x0 = uFixedX[0]; // 64
+    float x1 = uFixedX[1]; // 95
     float x2 = uFixedX[2]; // 128
-    float x3 = uFixedX[3]; // 192
-    float x4 = uFixedX[4]; // 224
+    float x3 = uFixedX[3]; // 156
 
     float x_low, x_high, y_low, y_high;
 
-    // 搜尋 x 所在的區間 [x_low, x_high] 以及對應的 y 值
+    // Logic for 4 Points (5 Intervals)
     if (x < x0) {
-        // [區間 1] 0 (全黑) 到 P0 (0 ~ 32)
+        // [Interval 1] 0 to P0 (0 ~ 64)
         x_low = 0.0;  y_low = 0.0; 
         x_high = x0;  y_high = y0;
     } else if (x < x1) {
-        // [區間 2] P0 到 P1 (32 ~ 64)
+        // [Interval 2] P0 to P1 (64 ~ 95)
         x_low = x0;   y_low = y0;
         x_high = x1;  y_high = y1;
     } else if (x < x2) {
-        // [區間 3] P1 到 P2 (64 ~ 128)
+        // [Interval 3] P1 to P2 (95 ~ 128)
         x_low = x1;   y_low = y1;
         x_high = x2;  y_high = y2;
     } else if (x < x3) {
-        // [區間 4] P2 到 P3 (128 ~ 192)
+        // [Interval 4] P2 to P3 (128 ~ 156)
         x_low = x2;   y_low = y2;
         x_high = x3;  y_high = y3;
-    } else if (x < x4) {
-        // [區間 5] P3 到 P4 (192 ~ 224)
-        x_low = x3;   y_low = y3;
-        x_high = x4;  y_high = y4;
     } else {
-        // [區間 6] P4 到 255 (224 ~ 255)
-        x_low = x4;   y_low = y4;
+        // [Interval 5] P3 to 255 (156 ~ 255)
+        x_low = x3;   y_low = y3;
         x_high = 1.0; y_high = 1.0;
     }
 
-    // 計算區間寬度
     float denominator = x_high - x_low;
-    // 防止除以零
     if (denominator == 0.0) return y_high;
 
-    // 計算斜率 (Slope)
     float m = (y_high - y_low) / denominator;
-
-    // 點斜式公式: y = y_start + slope * (x - x_start)
     float y = y_low + m * (x - x_low);
 
-    // 飽和度截斷 (Clamping)
     return (y < 0.0) ? 0.0 : ((y > 1.0) ? 1.0 : y);
 }
 
 void main() {
-    // 1. 採樣原始圖片顏色 (Normalized 0.0 ~ 1.0)
     vec3 inputColor = texture2D(uInputTexture, vTexCoord).rgb;
 
-    // 2. 採樣 5 個控制點紋理
-    // 這代表：如果原始像素是亮度 A，我們查看這 5 張圖在同一位置的值，
-    // 構建出一條針對「該像素位置」的校正曲線。
-
-    // --- R Channel (紅色通道資料) ---
+    // Sample only 4 control maps
     float r0 = texture2D(uControlPoint0, vTexCoord).r;
     float r1 = texture2D(uControlPoint1, vTexCoord).r;
     float r2 = texture2D(uControlPoint2, vTexCoord).r;
     float r3 = texture2D(uControlPoint3, vTexCoord).r;
-    float r4 = texture2D(uControlPoint4, vTexCoord).r;
 
-    // --- G Channel (綠色通道資料) ---
     float g0 = texture2D(uControlPoint0, vTexCoord).g;
     float g1 = texture2D(uControlPoint1, vTexCoord).g;
     float g2 = texture2D(uControlPoint2, vTexCoord).g;
     float g3 = texture2D(uControlPoint3, vTexCoord).g;
-    float g4 = texture2D(uControlPoint4, vTexCoord).g;
 
-    // --- B Channel (藍色通道資料) ---
     float b0 = texture2D(uControlPoint0, vTexCoord).b;
     float b1 = texture2D(uControlPoint1, vTexCoord).b;
     float b2 = texture2D(uControlPoint2, vTexCoord).b;
     float b3 = texture2D(uControlPoint3, vTexCoord).b;
-    float b4 = texture2D(uControlPoint4, vTexCoord).b;
 
-    // 3. 對 RGB 三個通道分別執行插值運算
-    float newR = interpolate(inputColor.r, r0, r1, r2, r3, r4);
-    float newG = interpolate(inputColor.g, g0, g1, g2, g3, g4);
-    float newB = interpolate(inputColor.b, b0, b1, b2, b3, b4);
+    // Call interpolate with 4 points
+    float newR = interpolate(inputColor.r, r0, r1, r2, r3);
+    float newG = interpolate(inputColor.g, g0, g1, g2, g3);
+    float newB = interpolate(inputColor.b, b0, b1, b2, b3);
 
-    // 4. 輸出最終像素顏色 (Alpha 設為 1.0 不透明)
     gl_FragColor = vec4(newR, newG, newB, 1.0);
 }
 )";
@@ -387,7 +363,7 @@ GLuint compileShader(GLenum type, const char* source) {
 // ============================================================================
 // 函數：初始化圖形系統
 // ============================================================================
-bool prepareGraphics(const char* inputFile, const char* controlFiles[5]) {
+bool prepareGraphics(const char* inputFile, const char* controlFiles[4]) {
     printf("正在初始化圖形資源 (解析度: %dx%d)...\n", SCENE_WIDTH, SCENE_HEIGHT);
     
     // 1. 載入原始 BMP 圖片到記憶體
@@ -396,9 +372,9 @@ bool prepareGraphics(const char* inputFile, const char* controlFiles[5]) {
         return false;
     }
     
-    // 2. 載入 5 張控制點 BMP 圖片
-    vector<unsigned char> controlData[5];
-    for (int i = 0; i < 5; i++) {
+    // 2. 載入 4 張控制點 BMP 圖片
+    vector<unsigned char> controlData[4];
+    for (int i = 0; i < 4; i++) {
         int w, h;
         if (!loadBMP(controlFiles[i], controlData[i], w, h)) {
             return false;
@@ -435,7 +411,6 @@ bool prepareGraphics(const char* inputFile, const char* controlFiles[5]) {
     iLocControlPoint[1] = glGetUniformLocation(programID, "uControlPoint1");
     iLocControlPoint[2] = glGetUniformLocation(programID, "uControlPoint2");
     iLocControlPoint[3] = glGetUniformLocation(programID, "uControlPoint3");
-    iLocControlPoint[4] = glGetUniformLocation(programID, "uControlPoint4");
     iLocFixedX = glGetUniformLocation(programID, "uFixedX");
     
     // 6. 設定 VBO (啟用頂點屬性陣列)
@@ -459,8 +434,8 @@ bool prepareGraphics(const char* inputFile, const char* controlFiles[5]) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     
-    // 8. 建立並上傳 5 個控制點紋理到 GPU
-    for (int i = 0; i < 5; i++) {
+    // 8. 建立並上傳 4 個控制點紋理到 GPU
+    for (int i = 0; i < 4; i++) {
         glGenTextures(1, &controlPointTextureID[i]);
         glBindTexture(GL_TEXTURE_2D, controlPointTextureID[i]);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, imageWidth, imageHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, &controlData[i][0]);
@@ -497,15 +472,15 @@ void GraphicsUpdate() {
     glBindTexture(GL_TEXTURE_2D, inputTextureID);
     glUniform1i(iLocInputTexture, 0); // 告訴 Shader uInputTexture 對應 Unit 0
     
-    // Unit 1~5: 控制點影像
-    for (int i = 0; i < 5; i++) {
+    // Unit 1~4: 控制點影像
+    for (int i = 0; i < 4; i++) {
         glActiveTexture(GL_TEXTURE1 + i); // 依序啟動 Texture Unit 1, 2, 3...
         glBindTexture(GL_TEXTURE_2D, controlPointTextureID[i]);
-        glUniform1i(iLocControlPoint[i], 1 + i); // 告訴 Shader 對應 Unit 1~5
+        glUniform1i(iLocControlPoint[i], 1 + i); // 告訴 Shader 對應 Unit 1~4
     }
     
     // 2. 更新 Uniform 變數 (X軸分段點)
-    glUniform1fv(iLocFixedX, 5, (GLfloat*)FIXED_X);
+    glUniform1fv(iLocFixedX, 4, (GLfloat*)FIXED_X);
     
     // 3. 發出繪圖指令
     // GL_TRIANGLE_STRIP: 使用 4 個頂點繪製矩形 (兩個三角形)
@@ -518,11 +493,11 @@ void GraphicsUpdate() {
 // ============================================================================
 int main(int argc, char* argv[]) {
     // ... (保留原本的參數檢查與初始化程式碼) ...
-    if (argc != 7) {
-        printf("使用方法: %s <輸入BMP> <點1> <點2> <點3> <點4> <點5>\n", argv[0]);
+    if (argc != 6) {
+        printf("使用方法: %s <輸入BMP> <點1> <點2> <點3> <點4>\n", argv[0]);
         return 1;
     }
-    const char* controlFiles[5] = {argv[2], argv[3], argv[4], argv[5], argv[6]};
+    const char* controlFiles[4] = {argv[2], argv[3], argv[4], argv[5]};
 
     // 1. 系統與 OpenGL 初始化
     XPodium *podium = XPodium::getHandler();
@@ -533,7 +508,7 @@ int main(int argc, char* argv[]) {
     // *** 關鍵設定：控制 VSync ***
     // 設為 1: 開啟 VSync (鎖定 60FPS)，總時間會包含等待時間
     // 設為 0: 關閉 VSync，總時間即為真實運算極限
-    eglSwapInterval(CoreEGL::display, 0);
+    eglSwapInterval(CoreEGL::display, 1);
 
     if (!prepareGraphics(argv[1], controlFiles)) return 1;
 

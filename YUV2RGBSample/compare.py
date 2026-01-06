@@ -88,8 +88,7 @@ def compare_bitmaps(img1_path, img2_path):
         print(f"發生未預期的錯誤: {e}")
 
 if __name__ == "__main__":
-    # 設定要比對的兩張圖
-    file_a = "r192.bmp"
-    file_b = "Supportingfiles/1216/Correction-Red-192.bmp"
+    file_a = "Supportingfiles/0106/output/W128.bmp"
+    file_b = "Supportingfiles/0106/White128.Bmp"
     
     compare_bitmaps(file_a, file_b)
