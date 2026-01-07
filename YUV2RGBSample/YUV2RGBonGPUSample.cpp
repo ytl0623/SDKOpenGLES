@@ -9,129 +9,186 @@
 #include <chrono>
 #include <stdio.h>
 #include <cmath>
+#include <thread>
 
-// 自定義標頭檔 (假設這些是封裝好的視窗與 EGL 工具)
-// XLinuxPodium: 負責 Linux 底層視窗系統 (如 X11 或 Wayland) 的管理
-// XGLSLCompile: 可能包含輔助 Shader 編譯的工具
-// XEGLIntf: 負責 EGL Context 的初始化與管理
+extern "C" {
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
+#include <libavutil/imgutils.h>
+}
+
 #include "XLinuxPodium.h"
 #include "XGLSLCompile.h"
 #include "XEGLIntf.h"
 
-// ============================================================================
-// 常數定義
-// ============================================================================
-// 定義場景視窗的解析度 (Full HD)
 #define SCENE_WIDTH 1920
-#define SCENE_HEIGHT 900
+#define SCENE_HEIGHT 1080
 
 using std::string;
 using std::vector;
 
-// ============================================================================
-// 工具類別：計時器 (Timer)
-// ============================================================================
-/**
- * 用於效能分析的計時器類別。
- * 採用 RAII (Resource Acquisition Is Initialization) 模式：
- * - 建構子 (Constructor) 記錄開始時間。
- * - 解構子 (Destructor) 計算並印出執行時間。
- * 適合用來包在 { }區塊中，測量該區塊的耗時。
- */
+// ... (Timer 類別與 BMP 結構定義保持不變) ...
+// 簡單的計時器類別，用於測量程式碼區塊的執行時間
 class Timer {
 private:
     std::chrono::high_resolution_clock::time_point start_time;
     const char* name;
-    
 public:
     Timer(const char* timer_name) : name(timer_name) {
         start_time = std::chrono::high_resolution_clock::now();
     }
-    
     ~Timer() {
         auto end_time = std::chrono::high_resolution_clock::now();
-        // 將時間差轉換為微秒 (microseconds) 後除以 1000 轉為毫秒
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-        printf("[%s] 耗時: %.3f ms\n", name, duration.count() / 1000.0);
-    }
-    
-    // 手動獲取經過時間 (毫秒)，不等待解構
-    double getElapsedMs() {
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-        return duration.count() / 1000.0;
+        // printf("[%s] 耗時: %.3f ms\n", name, duration.count() / 1000.0);
     }
 };
 
-// ============================================================================
-// BMP 檔案格式結構定義
-// ============================================================================
-// #pragma pack(push, 1) 用於告訴編譯器：
-// 結構體內的成員必須緊密排列 (以 1 byte 對齊)，不要為了記憶體存取效能自動補零 (Padding)。
-// 因為 BMP 檔案標頭是連續的二進位資料，如果有 Padding 會導致讀取錯誤。
+// 設定結構體對齊為 1 byte，避免編譯器自動補齊造成讀取 BMP 標頭錯誤
 #pragma pack(push, 1)
 
-// BMP 檔案標頭 (File Header) - 固定 14 bytes
+// BMP 檔案標頭 (File Header) - 共 14 bytes
 typedef struct {
-    uint16_t type;        // 識別碼，必須是 'BM' (0x4D42)
-    uint32_t size;        // 整個檔案的大小
-    uint16_t reserved1;   // 保留
-    uint16_t reserved2;   // 保留
-    uint32_t offset;      // 點陣圖資料 (Pixel Data) 開始的位元組偏移量
+    uint16_t type;        // 檔案類型標記，必須是 0x4D42 (ASCII 的 'BM')
+    uint32_t size;        // 整個檔案的大小 (bytes)
+    uint16_t reserved1;   // 保留欄位，必須為 0
+    uint16_t reserved2;   // 保留欄位，必須為 0
+    uint32_t offset;      // 像素資料在檔案中的起始偏移量 (Offset)
 } BMPFileHeader;
 
-// BMP 資訊標頭 (Info Header) - Windows V3 格式，40 bytes
+// BMP 資訊標頭 (Info Header) - 共 40 bytes (Windows V3 Header)
 typedef struct {
-    uint32_t size;              // 結構體大小
-    int32_t width;              // 圖像寬度
-    int32_t height;             // 圖像高度 (正值: 倒立儲存, 負值: 正向儲存)
-    uint16_t planes;            // 平面數 (Must be 1)
-    uint16_t bits;              // 色深 (Bit Depth)，本程式只處理 24-bit
-    uint32_t compression;       // 壓縮方式
-    uint32_t imagesize;         // 影像資料大小
-    int32_t xresolution;        // 水平解析度
-    int32_t yresolution;        // 垂直解析度
-    uint32_t ncolours;          // 調色盤顏色數
+    uint32_t size;              // 此結構體的大小 (通常為 40)
+    int32_t width;              // 圖像寬度 (pixels)
+    int32_t height;             // 圖像高度 (pixels)
+    uint16_t planes;            // 色彩平面數，必須為 1
+    uint16_t bits;              // 每像素位元數 (如 24 代表 RGB 888)
+    uint32_t compression;       // 壓縮類型 (0 = BI_RGB 無壓縮)
+    uint32_t imagesize;         // 原始點陣圖資料大小 (bytes)
+    int32_t xresolution;        // 水平解析度 (像素/米)
+    int32_t yresolution;        // 垂直解析度 (像素/米)
+    uint32_t ncolours;          // 調色盤使用的顏色數 (0 代表全部)
     uint32_t importantcolours;  // 重要顏色數
 } BMPInfoHeader;
 
-#pragma pack(pop)  // 恢復預設的記憶體對齊設定
+#pragma pack(pop) // 恢復原本的對齊設定
+
+// ============================================================================
+// 修改後的 VideoReader (移除 sws_scale，直接輸出 raw frame)
+// 用途：負責透過 FFmpeg 解碼影片，但不進行任何軟體顏色轉換
+// ============================================================================
+class VideoReader {
+public:
+    AVFormatContext* format_ctx = nullptr;
+    AVCodecContext* codec_ctx = nullptr;
+    int video_stream_index = -1;
+    AVFrame* frame = nullptr;   // 存放解碼後的原始 YUV 數據
+    AVPacket* packet = nullptr; // 存放解碼前的壓縮數據
+    int width = 0;
+    int height = 0;
+
+    VideoReader() {}
+
+    ~VideoReader() {
+        if (frame) av_frame_free(&frame);
+        if (packet) av_packet_free(&packet);
+        if (codec_ctx) avcodec_free_context(&codec_ctx);
+        if (format_ctx) avformat_close_input(&format_ctx);
+    }
+
+    // 開啟影片檔並初始化解碼器
+    bool open(const char* filename) {
+        // 1. 打開輸入流
+        if (avformat_open_input(&format_ctx, filename, nullptr, nullptr) != 0) return false;
+        // 2. 讀取串流資訊
+        if (avformat_find_stream_info(format_ctx, nullptr) < 0) return false;
+
+        // 3. 尋找最佳的視訊串流
+        const AVCodec *codec = NULL;
+        video_stream_index = av_find_best_stream(format_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &codec, 0);
+        if (video_stream_index < 0) return false;
+
+        // 4. 配置解碼器上下文
+        codec_ctx = avcodec_alloc_context3(codec);
+        avcodec_parameters_to_context(codec_ctx, format_ctx->streams[video_stream_index]->codecpar);
+
+        // 5. 開啟解碼器
+        if (avcodec_open2(codec_ctx, codec, nullptr) < 0) return false;
+
+        width = codec_ctx->width;
+        height = codec_ctx->height;
+        printf("影片資訊: %dx%d, Codec: %s (YUV420P)\n", width, height, codec->name);
+
+        frame = av_frame_alloc();
+        packet = av_packet_alloc();
+        
+        // 注意：這裡移除了 sws_getContext，因為我們要在 Shader 中處理 YUV 轉 RGB
+        return true;
+    }
+
+    // 讀取並解碼下一幀
+    // 回傳：true 代表成功讀取到一幀，false 代表影片結束或錯誤
+    bool readNextFrame() {
+        while (av_read_frame(format_ctx, packet) >= 0) {
+            if (packet->stream_index == video_stream_index) {
+                // 發送壓縮封包給解碼器
+                if (avcodec_send_packet(codec_ctx, packet) == 0) {
+                    // 從解碼器接收解碼後的幀 (Raw Frame)
+                    int ret = avcodec_receive_frame(codec_ctx, frame);
+                    if (ret == 0) {
+                        av_packet_unref(packet);
+                        return true; // 成功取得一幀 YUV 數據
+                    }
+                }
+            }
+            av_packet_unref(packet);
+        }
+        // 影片播放完畢，跳回開頭循環播放
+        av_seek_frame(format_ctx, video_stream_index, 0, AVSEEK_FLAG_BACKWARD);
+        return false; 
+    }
+};
 
 // ============================================================================
 // 全域變數
 // ============================================================================
+VideoReader videoReader;
 string resourceDirectory = "Supportingfiles/";
 
-// OpenGL Shader 程式相關 Handle
-GLuint programID;             // Shader Program 物件
-GLint iLocPosition = -1;      // 頂點屬性位置 (aPosition)
-GLint iLocTexCoord = -1;      // 紋理屬性位置 (aTexCoord)
+GLuint programID;
+GLint iLocPosition = -1;
+GLint iLocTexCoord = -1;
 
-// Uniform Locations: 用於從 C++ 傳送數據到 Shader
-GLint iLocInputTexture = -1;                  // 原始影像紋理單元索引
-GLint iLocControlPoint[4] = {-1, -1, -1, -1}; // 4個控制點紋理單元索引
-GLint iLocFixedX = -1;                        // X 軸分割點座標陣列
+// 修改：需要 3 個紋理位置變數 (分別對應 Y, U, V 平面)
+GLint iLocTextureY = -1;
+GLint iLocTextureU = -1;
+GLint iLocTextureV = -1;
 
-// OpenGL Texture Objects (紋理物件 ID)
-GLuint inputTextureID;           // 輸入影像
-GLuint controlPointTextureID[4]; // 4張控制圖 (Spatial Correction Maps)
+// 控制點紋理與參數
+GLint iLocControlPoint[5];
+GLint iLocFixedX = -1;
+GLint iLocEnableDemura = -1;
 
-// 圖片尺寸 (全域記錄，假設所有圖片尺寸相同)
-int imageWidth = 0;
-int imageHeight = 0;
+// 修改：需要 3 個紋理 ID 來儲存 Y, U, V 數據
+GLuint textureIdY;
+GLuint textureIdU;
+GLuint textureIdV;
 
-// 定義 X 軸的 4 個固定節點 (標準化到 0.0 ~ 1.0)
-// 這些點將灰階值 (0~255) 分割成不同區間進行插值
-const float FIXED_X[4] = {
+GLuint controlPointTextureID[5];
+
+int imageWidth = 1920;
+int imageHeight = 1080;
+
+// 定義 5 個控制點的 X 軸亮度分佈 (0~1 之間)
+const float FIXED_X[5] = {
+    32.0f/255.0f,
     64.0f/255.0f,
-    95.0f/255.0f,
     128.0f/255.0f,
-    156.0f/255.0f
+    192.0f/255.0f,
+    224.0f/255.0f
 };
 
-// 全螢幕四邊形 (Full Screen Quad) 的頂點資料
-// 使用 Triangle Strip 繪製兩個三角形組成一個矩形
-// 座標系: Normalized Device Coordinates (NDC), 範圍 [-1, 1]
+// 頂點座標 (全螢幕四邊形)
 const GLfloat vertexVertices[] = {
     -1.0f, -1.0f,  // 左下
      1.0f, -1.0f,  // 右下
@@ -139,18 +196,15 @@ const GLfloat vertexVertices[] = {
      1.0f,  1.0f   // 右上
 };
 
-// 對應的紋理座標 (UV)
-// 座標系: UV Space, 範圍 [0, 1], 原點通常在左下 (OpenGL 標準)
+// 紋理座標 (UV，左上角為 0,0)
 const GLfloat textureVertices[] = {
-    0.0f, 0.0f,  // 左下
-    1.0f, 0.0f,  // 右下
-    0.0f, 1.0f,  // 左上
-    1.0f, 1.0f   // 右上
+    0.0f, 1.0f,  // 左下 (OpenGL 紋理座標 Y 軸向上，視情況調整)
+    1.0f, 1.0f,  // 右下
+    0.0f, 0.0f,  // 左上
+    1.0f, 0.0f   // 右上
 };
 
-// ============================================================================
-// 函數：載入 BMP 圖片 (核心 I/O)
-// ============================================================================
+// 讀取 BMP 圖片函式
 bool loadBMP(const char* filename, vector<unsigned char>& data, int& width, int& height) {
     FILE* file = fopen(filename, "rb");
     if (!file) {
@@ -161,7 +215,7 @@ bool loadBMP(const char* filename, vector<unsigned char>& data, int& width, int&
     BMPFileHeader fileHeader;
     BMPInfoHeader infoHeader;
     
-    // 讀取標頭
+    // 讀取標頭資訊
     if (fread(&fileHeader, sizeof(BMPFileHeader), 1, file) != 1 ||
         fread(&infoHeader, sizeof(BMPInfoHeader), 1, file) != 1) {
         printf("錯誤: 讀取 BMP 標頭失敗 %s\n", filename);
@@ -169,14 +223,14 @@ bool loadBMP(const char* filename, vector<unsigned char>& data, int& width, int&
         return false;
     }
     
-    // 驗證 BMP 格式
+    // 檢查魔術數字 (Magic Number)
     if (fileHeader.type != 0x4D42) {
         printf("錯誤: 不是有效的 BMP 檔案 %s\n", filename);
         fclose(file);
         return false;
     }
      
-    // 檢查色深 (本範例不支援 8-bit 調色盤或 32-bit Alpha)
+    // 本程式僅支援 24-bit (RGB) 格式
     if (infoHeader.bits != 24) {
         printf("錯誤: 僅支援 24-bit BMP %s\n", filename);
         fclose(file);
@@ -184,31 +238,27 @@ bool loadBMP(const char* filename, vector<unsigned char>& data, int& width, int&
     }
     
     width = infoHeader.width;
-    height = std::abs(infoHeader.height); // 取絕對值處理高度
+    height = std::abs(infoHeader.height); // 高度可能為負，表示由上而下儲存
     
-    // 計算 Row Size (Stride): BMP 規定每一行的 bytes 數必須是 4 的倍數
-    // 公式說明:
-    // (width * 3) 是實際像素佔用的 bytes (RGB各1 byte)
-    // +3 然後 /4 再 *4 是一種向上取整到 4 的倍數的技巧
+    // BMP 的每一列 (Row) 資料長度必須是 4 bytes 的倍數 (Padding)
+    // 計算每列包含 Padding 的實際位元組數
     int rowSize = ((width * 3 + 3) / 4) * 4;
     int imageSize = rowSize * height;
     
     vector<unsigned char> rawData(imageSize);
-    fseek(file, fileHeader.offset, SEEK_SET); // 移動檔案指標到像素資料開頭
-    fread(&rawData[0], 1, imageSize, file);   // 一次性讀取所有像素資料
+    fseek(file, fileHeader.offset, SEEK_SET); // 跳到像素資料開始處
+    fread(&rawData[0], 1, imageSize, file);
     fclose(file);
     
-    // 格式轉換: BMP (BGR + Padding) -> OpenGL (RGB + Packed)
+    // 將 BGR (BMP 標準) 轉換為 RGB (OpenGL 標準) 並移除 Padding
     data.resize(width * height * 3);
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
-            // 計算來源索引 (包含 Padding)
-            int srcIdx = y * rowSize + x * 3;
-            // 計算目標索引 (緊密排列，無 Padding)
-            int dstIdx = y * width * 3 + x * 3;
+            int srcIdx = y * rowSize + x * 3;      // 來源索引 (含 Padding)
+            int dstIdx = y * width * 3 + x * 3;    // 目標索引 (緊密排列)
             
-            // BMP 像素順序是 BGR，OpenGL 需要 RGB，因此需要交換
-            data[dstIdx]     = rawData[srcIdx + 2]; // R from BGR's 3rd byte
+            // BMP 儲存順序為 B, G, R，需交換為 R, G, B
+            data[dstIdx]     = rawData[srcIdx + 2]; // R
             data[dstIdx + 1] = rawData[srcIdx + 1]; // G
             data[dstIdx + 2] = rawData[srcIdx];     // B
         }
@@ -220,132 +270,169 @@ bool loadBMP(const char* filename, vector<unsigned char>& data, int& width, int&
 
 // ============================================================================
 // Vertex Shader (頂點著色器)
+// 用途：處理頂點位置與紋理座標的傳遞
 // ============================================================================
-// 負責處理幾何頂點，這裡只做簡單的 Pass-through
 const char* vertexShaderSource = R"(
-attribute vec2 aPosition;  // 從 C++ 傳入的頂點座標
-attribute vec2 aTexCoord;  // 從 C++ 傳入的紋理座標
-varying vec2 vTexCoord;    // 輸出給 Fragment Shader 的紋理座標 (會自動插值)
+attribute vec2 aPosition;
+attribute vec2 aTexCoord;
+varying vec2 vTexCoord;
 
 void main() {
-    // 設定裁剪空間座標 (Clip Space Coordinates)
     gl_Position = vec4(aPosition, 0.0, 1.0);
-    
-    // 將紋理座標原樣傳遞
     vTexCoord = aTexCoord;
 }
 )";
 
 // ============================================================================
-// Fragment Shader (片段著色器) - 核心演算法
+// Fragment Shader (片段著色器) - 核心邏輯
+// 用途：1. 將 YUV 轉為 RGB 
+//       2. 讀取 5 張控制點圖
+//       3. 根據當前像素亮度進行分段線性插值 (De-mura 補償)
 // ============================================================================
-// 負責計算每個像素的最終顏色。
-// 演算法邏輯：空間變異的色彩校正 (Spatially Varying Color Correction)
-// 1. 讀取原始影像的顏色 (inputColor)
-// 2. 在相同位置讀取 4 張控制圖 (Control Points)，代表在不同亮度等級下的校正目標值。
-// 3. 根據 inputColor 的亮度，在這些控制點之間進行線性插值，算出最終顏色。
 const char* fragmentShaderSource = R"(
-precision highp float;      // 宣告浮點數精度，避免手機 GPU 上精度不足
-varying vec2 vTexCoord;     // 接收 Vertex Shader 插值後的座標
+precision highp float;
+varying vec2 vTexCoord;
 
-uniform sampler2D uInputTexture;    // 原始影像
+// YUV 紋理輸入 (YUV420P 被拆成三個單通道紋理)
+uniform sampler2D uTextureY;
+uniform sampler2D uTextureU;
+uniform sampler2D uTextureV;
 
-// 5張控制點紋理 (Lookup Tables / Correction Maps)
-// 每張圖代表當輸入亮度為 uFixedX[i] 時，應該輸出的亮度值 (或顏色)
-uniform sampler2D uControlPoint0;   
-uniform sampler2D uControlPoint1;   
-uniform sampler2D uControlPoint2;   
-uniform sampler2D uControlPoint3; 
+// 5張控制點紋理 (用於亮度補償)
+uniform sampler2D uControlPoint0;
+uniform sampler2D uControlPoint1;
+uniform sampler2D uControlPoint2;
+uniform sampler2D uControlPoint3;
+uniform sampler2D uControlPoint4;
 
-// X軸的分段點 (Input Level)
-uniform float uFixedX[4]; 
+// X軸座標定義 (亮度分界點)
+uniform float uFixedX[5];
+uniform int uEnableDemura;
 
-// ----------------------------------------------------------------------------
-// 函數: 分段線性插值 (Piecewise Linear Interpolation)
-// 輸入: x (原始亮度), y0~y4 (該像素在不同亮度級距下的校正目標值)
-// 輸出: 校正後的亮度
-// ----------------------------------------------------------------------------
-float interpolate(float x, float y0, float y1, float y2, float y3) {
-    float x0 = uFixedX[0]; // 64
-    float x1 = uFixedX[1]; // 95
-    float x2 = uFixedX[2]; // 128
-    float x3 = uFixedX[3]; // 156
+// --- YUV 轉 RGB 函數 ---
+// 使用 BT.709 標準 (適用於 HDTV/MP4 1920x1080)
+// 這裡將 YUV 轉回 RGB 以便進行後續的顏色補償運算
+vec3 yuv2rgb(vec2 uv) {
+    float y = texture2D(uTextureY, uv).r;
+    float u = texture2D(uTextureU, uv).r - 0.5; // GL讀取為 0~1，需平移回 -0.5~0.5
+    float v = texture2D(uTextureV, uv).r - 0.5;
+    
+    // BT.709 轉換矩陣 (HD 標準)
+    float r = y + 1.5748 * v;
+    float g = y - 0.1873 * u - 0.4681 * v;
+    float b = y + 1.8556 * u;
+    
+    return vec3(r, g, b);
+}
 
+// 分段線性插值函數 (含原點 0,0 錨定邏輯)
+// x: 輸入的原始亮度值 (R, G, 或 B)
+// y0~y4: 該像素位置在 5 張控制圖上的補償目標值
+float interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
+    float x0 = uFixedX[0];
+    float x1 = uFixedX[1];
+    float x2 = uFixedX[2];
+    float x3 = uFixedX[3];
+    float x4 = uFixedX[4];
+    
     float x_low, x_high, y_low, y_high;
-
-    // Logic for 4 Points (5 Intervals)
+    
+    // 搜尋 x 所在的區間 [x_low, x_high] 以及對應的 y 值
     if (x < x0) {
-        // [Interval 1] 0 to P0 (0 ~ 64)
+        // [區間 1] 0 (全黑) 到 P0 (0 ~ 32)
         x_low = 0.0;  y_low = 0.0; 
         x_high = x0;  y_high = y0;
     } else if (x < x1) {
-        // [Interval 2] P0 to P1 (64 ~ 95)
+        // [區間 2] P0 到 P1 (32 ~ 64)
         x_low = x0;   y_low = y0;
         x_high = x1;  y_high = y1;
     } else if (x < x2) {
-        // [Interval 3] P1 to P2 (95 ~ 128)
+        // [區間 3] P1 到 P2 (64 ~ 128)
         x_low = x1;   y_low = y1;
         x_high = x2;  y_high = y2;
     } else if (x < x3) {
-        // [Interval 4] P2 to P3 (128 ~ 156)
+        // [區間 4] P2 到 P3 (128 ~ 192)
         x_low = x2;   y_low = y2;
         x_high = x3;  y_high = y3;
-    } else {
-        // [Interval 5] P3 to 255 (156 ~ 255)
+    } else if (x < x4) {
+        // [區間 5] P3 到 P4 (192 ~ 224)
         x_low = x3;   y_low = y3;
+        x_high = x4;  y_high = y4;
+    } else {
+        // [區間 6] P4 到 255 (224 ~ 255)
+        x_low = x4;   y_low = y4;
         x_high = 1.0; y_high = 1.0;
     }
-
+    
+    // 計算區間寬度
     float denominator = x_high - x_low;
+    // 防止除以零
     if (denominator == 0.0) return y_high;
 
+    // 計算斜率 m
     float m = (y_high - y_low) / denominator;
+
+    // 點斜式公式: y = y_start + slope * (x - x_start)
     float y = y_low + m * (x - x_low);
 
+    // 飽和度截斷 (Clamping)
     return (y < 0.0) ? 0.0 : ((y > 1.0) ? 1.0 : y);
 }
 
 void main() {
-    vec3 inputColor = texture2D(uInputTexture, vTexCoord).rgb;
+    // 1. 將 YUV 轉為 RGB 取得原始像素顏色
+    vec3 inputColor = yuv2rgb(vTexCoord);
 
-    // Sample only 4 control maps
+    if (uEnableDemura == 0) {
+        gl_FragColor = vec4(inputColor, 1.0);
+        return;
+    }
+
+    // 2. 採樣 5 個控制點紋理
+    // 分別取得該像素在不同亮度等級下的補償值 (Texture Lookup)
+    
+    // --- R Channel (紅色通道) ---
     float r0 = texture2D(uControlPoint0, vTexCoord).r;
     float r1 = texture2D(uControlPoint1, vTexCoord).r;
     float r2 = texture2D(uControlPoint2, vTexCoord).r;
     float r3 = texture2D(uControlPoint3, vTexCoord).r;
+    float r4 = texture2D(uControlPoint4, vTexCoord).r;
 
+    // --- G Channel (綠色通道) ---
     float g0 = texture2D(uControlPoint0, vTexCoord).g;
     float g1 = texture2D(uControlPoint1, vTexCoord).g;
     float g2 = texture2D(uControlPoint2, vTexCoord).g;
     float g3 = texture2D(uControlPoint3, vTexCoord).g;
+    float g4 = texture2D(uControlPoint4, vTexCoord).g;
 
+    // --- B Channel (藍色通道) ---
     float b0 = texture2D(uControlPoint0, vTexCoord).b;
     float b1 = texture2D(uControlPoint1, vTexCoord).b;
     float b2 = texture2D(uControlPoint2, vTexCoord).b;
     float b3 = texture2D(uControlPoint3, vTexCoord).b;
+    float b4 = texture2D(uControlPoint4, vTexCoord).b;
 
-    // Call interpolate with 4 points
-    float newR = interpolate(inputColor.r, r0, r1, r2, r3);
-    float newG = interpolate(inputColor.g, g0, g1, g2, g3);
-    float newB = interpolate(inputColor.b, b0, b1, b2, b3);
+    // 3. 執行插值補償
+    // 根據原始輸入值 (inputColor.r/g/b) 與控制點 (r0~r4 等) 計算最終輸出
+    float newR = interpolate(inputColor.r, r0, r1, r2, r3, r4);
+    float newG = interpolate(inputColor.g, g0, g1, g2, g3, g4);
+    float newB = interpolate(inputColor.b, b0, b1, b2, b3, b4);
 
+    // 4. 輸出最終顏色
     gl_FragColor = vec4(newR, newG, newB, 1.0);
 }
+
 )";
 
-// ============================================================================
-// 函數：編譯 Shader
-// ============================================================================
+// 編譯 Shader 的輔助函式
 GLuint compileShader(GLenum type, const char* source) {
-    GLuint shader = glCreateShader(type); // 建立 Shader 物件
-    glShaderSource(shader, 1, &source, NULL); // 載入原始碼
-    glCompileShader(shader); // 編譯
+    GLuint shader = glCreateShader(type);
+    glShaderSource(shader, 1, &source, NULL);
+    glCompileShader(shader);
     
-    // 檢查編譯狀態
     GLint compiled;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
     if (!compiled) {
-        // 若失敗，取出錯誤訊息 Log
         GLint infoLen = 0;
         glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLen);
         if (infoLen > 0) {
@@ -360,216 +447,244 @@ GLuint compileShader(GLenum type, const char* source) {
     return shader;
 }
 
-// ============================================================================
-// 函數：初始化圖形系統
-// ============================================================================
-bool prepareGraphics(const char* inputFile, const char* controlFiles[4]) {
-    printf("正在初始化圖形資源 (解析度: %dx%d)...\n", SCENE_WIDTH, SCENE_HEIGHT);
-    
-    // 1. 載入原始 BMP 圖片到記憶體
-    vector<unsigned char> inputData;
-    if (!loadBMP(inputFile, inputData, imageWidth, imageHeight)) {
+// 初始化圖形資源：讀取影片、讀取控制圖、編譯 Shader、建立紋理
+bool prepareGraphics(const char* videoFile, const char* controlFiles[5]) {
+    // 1. 初始化影片讀取器
+    if (!videoReader.open(videoFile)) {
         return false;
     }
     
-    // 2. 載入 4 張控制點 BMP 圖片
-    vector<unsigned char> controlData[4];
-    for (int i = 0; i < 4; i++) {
+    // 2. 讀取 5 張 BMP 控制圖
+    vector<unsigned char> controlData[5];
+    for (int i = 0; i < 5; i++) {
         int w, h;
         if (!loadBMP(controlFiles[i], controlData[i], w, h)) {
             return false;
         }
 
-        // 確保控制圖尺寸與原圖一致 (這是 Pixel-to-Pixel 校正的前提)
+        // 檢查尺寸一致性：控制圖必須與原圖大小相同 (Mura 補償通常是 Pixel-to-Pixel)
         if (w != imageWidth || h != imageHeight) {
             printf("錯誤: 控制點圖片尺寸 (%dx%d) 與原圖不符\n", w, h);
             return false;
         }
     }
-    
-    // 3. 編譯 Vertex 和 Fragment Shaders
+
+    // 3. 編譯與連結 Shader Program
     GLuint vertShader = compileShader(GL_VERTEX_SHADER, vertexShaderSource);
     GLuint fragShader = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSource);
-    
+
     if (vertShader == 0 || fragShader == 0) return false;
-    
-    // 4. 建立 Program 並連結 Shaders
+
     programID = glCreateProgram();
     glAttachShader(programID, vertShader);
     glAttachShader(programID, fragShader);
     glLinkProgram(programID);
-    glUseProgram(programID); // 啟動此 Program
-    
-    // 5. 獲取 Shader 變數的位置 (Location)
-    // Attribute: 頂點資料
+    glUseProgram(programID);
+
+    // 4. 獲取 Shader 變數位置 (Uniform Location)
     iLocPosition = glGetAttribLocation(programID, "aPosition");
     iLocTexCoord = glGetAttribLocation(programID, "aTexCoord");
     
-    // Uniform: 全域參數
-    iLocInputTexture = glGetUniformLocation(programID, "uInputTexture");
+    // YUV 三個通道的 Texture Sampler
+    iLocTextureY = glGetUniformLocation(programID, "uTextureY");
+    iLocTextureU = glGetUniformLocation(programID, "uTextureU");
+    iLocTextureV = glGetUniformLocation(programID, "uTextureV");
+    
+    // 控制點 Texture Sampler
     iLocControlPoint[0] = glGetUniformLocation(programID, "uControlPoint0");
     iLocControlPoint[1] = glGetUniformLocation(programID, "uControlPoint1");
     iLocControlPoint[2] = glGetUniformLocation(programID, "uControlPoint2");
     iLocControlPoint[3] = glGetUniformLocation(programID, "uControlPoint3");
-    iLocFixedX = glGetUniformLocation(programID, "uFixedX");
+    iLocControlPoint[4] = glGetUniformLocation(programID, "uControlPoint4");
     
-    // 6. 設定 VBO (啟用頂點屬性陣列)
-    // 傳送頂點位置
+    iLocFixedX = glGetUniformLocation(programID, "uFixedX");
+    iLocEnableDemura = glGetUniformLocation(programID, "uEnableDemura");
+
+    // 5. 設定頂點屬性
     glEnableVertexAttribArray(iLocPosition);
     glVertexAttribPointer(iLocPosition, 2, GL_FLOAT, GL_FALSE, 0, vertexVertices);
-    
-    // 傳送紋理座標
+
     glEnableVertexAttribArray(iLocTexCoord);
     glVertexAttribPointer(iLocTexCoord, 2, GL_FLOAT, GL_FALSE, 0, textureVertices);
-    
-    // 7. 建立並上傳輸入紋理到 GPU
-    glGenTextures(1, &inputTextureID);
-    glBindTexture(GL_TEXTURE_2D, inputTextureID);
-    // 上傳像素資料
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, imageWidth, imageHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, &inputData[0]);
-    
-    // 設定紋理採樣參數: Nearest Neighbor (最鄰近插值)，因為我們要做精確的像素對應
+
+    // 6. 建立並設置 YUV 紋理 (預先分配記憶體)
+    // Texture Y: 解析度 WxH, 單通道 (GL_LUMINANCE)
+    glGenTextures(1, &textureIdY);
+    glBindTexture(GL_TEXTURE_2D, textureIdY);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, videoReader.width, videoReader.height, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    
-    // 8. 建立並上傳 4 個控制點紋理到 GPU
-    for (int i = 0; i < 4; i++) {
+
+    // Texture U: 解析度 W/2 x H/2 (因為是 YUV420P)
+    glGenTextures(1, &textureIdU);
+    glBindTexture(GL_TEXTURE_2D, textureIdU);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, videoReader.width / 2, videoReader.height / 2, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // Texture V: 解析度 W/2 x H/2
+    glGenTextures(1, &textureIdV);
+    glBindTexture(GL_TEXTURE_2D, textureIdV);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, videoReader.width / 2, videoReader.height / 2, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // 7. 建立控制點紋理並上傳資料 (靜態圖，只傳一次)
+    for (int i = 0; i < 5; i++) {
         glGenTextures(1, &controlPointTextureID[i]);
         glBindTexture(GL_TEXTURE_2D, controlPointTextureID[i]);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, imageWidth, imageHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, &controlData[i][0]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, imageWidth, imageHeight, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, &controlData[i][0]);
         
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        // 使用線性插值 (GL_LINEAR) 使控制圖平滑
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
-    
-    // 9. 基本 OpenGL 狀態設定
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f); // 設定背景清除色為黑色
-    glDisable(GL_DEPTH_TEST);             // 2D 繪圖通常不需要深度測試
+
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glDisable(GL_DEPTH_TEST); // 2D 影片播放不需要深度測試
     
     printf("OpenGL 初始化完成。\n");
     return true;
 }
 
-// ============================================================================
-// 函數：圖形渲染迴圈 (每幀呼叫)
-// ============================================================================
-void GraphicsUpdate() {
-    // 清除畫面緩衝區
-    glClear(GL_COLOR_BUFFER_BIT);
-    
-    // 設定視埠 (Viewport) 大小，填滿整個視窗
-    glViewport(0, 0, SCENE_WIDTH, SCENE_HEIGHT);
-    
-    // 1. 綁定紋理到對應的 Texture Unit (多重紋理)
-    // OpenGL 是一個狀態機，我們需要先「啟動」一個插槽 (Unit)，然後「綁定」紋理
-    
-    // Unit 0: 原始影像
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, inputTextureID);
-    glUniform1i(iLocInputTexture, 0); // 告訴 Shader uInputTexture 對應 Unit 0
-    
-    // Unit 1~4: 控制點影像
-    for (int i = 0; i < 4; i++) {
-        glActiveTexture(GL_TEXTURE1 + i); // 依序啟動 Texture Unit 1, 2, 3...
-        glBindTexture(GL_TEXTURE_2D, controlPointTextureID[i]);
-        glUniform1i(iLocControlPoint[i], 1 + i); // 告訴 Shader 對應 Unit 1~4
+// 每一幀的渲染循環
+void GraphicsUpdate(bool hasNewFrame, bool isDemuraOn) {
+    // 只有當有新的一幀解碼出來時，才執行耗時的紋理上傳 (CPU -> GPU)
+    if (hasNewFrame) {
+        // 更新 Y 平面
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, textureIdY);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, videoReader.width, videoReader.height, GL_LUMINANCE, GL_UNSIGNED_BYTE, videoReader.frame->data[0]);
+
+        // 更新 U 平面
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, textureIdU);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, videoReader.width / 2, videoReader.height / 2, GL_LUMINANCE, GL_UNSIGNED_BYTE, videoReader.frame->data[1]);
+
+        // 更新 V 平面
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, textureIdV);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, videoReader.width / 2, videoReader.height / 2, GL_LUMINANCE, GL_UNSIGNED_BYTE, videoReader.frame->data[2]);
     }
-    
-    // 2. 更新 Uniform 變數 (X軸分段點)
-    glUniform1fv(iLocFixedX, 4, (GLfloat*)FIXED_X);
-    
-    // 3. 發出繪圖指令
-    // GL_TRIANGLE_STRIP: 使用 4 個頂點繪製矩形 (兩個三角形)
-    // 這會觸發 GPU 的 Rendering Pipeline
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4); 
+
+    // 渲染與 Shader 計算 (這部分是純 GPU 運算)
+    glClear(GL_COLOR_BUFFER_BIT);
+    glViewport(0, 0, SCENE_WIDTH, SCENE_HEIGHT);
+
+    // 綁定紋理單元
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, textureIdY); glUniform1i(iLocTextureY, 0);
+    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, textureIdU); glUniform1i(iLocTextureU, 1);
+    glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, textureIdV); glUniform1i(iLocTextureV, 2);
+
+    for (int i = 0; i < 5; i++) {
+        glActiveTexture(GL_TEXTURE3 + i);
+        glBindTexture(GL_TEXTURE_2D, controlPointTextureID[i]);
+        glUniform1i(iLocControlPoint[i], 3 + i);
+    }
+    glUniform1fv(iLocFixedX, 5, (GLfloat*)FIXED_X);
+    glUniform1i(iLocEnableDemura, isDemuraOn ? 1 : 0);
+
+    // 觸發 GPU Pipeline
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
 // ============================================================================
-// 主程式 (Entry Point)
+// 主程式 (Entry Point) - 包含詳細時間測量邏輯
 // ============================================================================
 int main(int argc, char* argv[]) {
-    // ... (保留原本的參數檢查與初始化程式碼) ...
-    if (argc != 6) {
-        printf("使用方法: %s <輸入BMP> <點1> <點2> <點3> <點4>\n", argv[0]);
+    if (argc != 7) {
+        printf("使用方法: %s <影片.mp4> <點1.bmp> ...\n", argv[0]);
         return 1;
     }
-    const char* controlFiles[4] = {argv[2], argv[3], argv[4], argv[5]};
+    const char* controlFiles[5] = {argv[2], argv[3], argv[4], argv[5], argv[6]};
 
-    // 1. 系統與 OpenGL 初始化
+    // 1. 系統初始化
     XPodium *podium = XPodium::getHandler();
     podium->prepareWindow(SCENE_WIDTH, SCENE_HEIGHT);
     CoreEGL::initializeEGL(CoreEGL::OPENGLES2);
     eglMakeCurrent(CoreEGL::display, CoreEGL::surface, CoreEGL::surface, CoreEGL::context);
-
+    
     // *** 關鍵設定：控制 VSync ***
     // 設為 1: 開啟 VSync (鎖定 60FPS)，總時間會包含等待時間
     // 設為 0: 關閉 VSync，總時間即為真實運算極限
-    eglSwapInterval(CoreEGL::display, 1);
+    eglSwapInterval(CoreEGL::display, 0);
 
     if (!prepareGraphics(argv[1], controlFiles)) return 1;
 
-    printf("\n--- 開始效能測量 ---\n");
+    printf("\n--- 開始效能測量 (CPU Decode vs GPU Render) ---\n");
     
+    // [新增] 應用程式開始時間點
+    auto app_start_time = std::chrono::high_resolution_clock::now();
+
     bool end = false;
     int frame_count = 0;
 
     while (!end) {
         if (podium->checkWindow() != XPodium::WINDOW_IDLE) end = true;
-
-        // ============================================================
-        // 效能測量開始
-        // ============================================================
         
-        // 1. 紀錄 [總幀時間] 的起點
+        // ==========================================
+        // [新增] 計算經過時間與決定模式
+        // ==========================================
+        auto current_time = std::chrono::high_resolution_clock::now();
+        double elapsed_seconds = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - app_start_time).count() / 1000.0;
+        
+        // 每 10 秒一個循環：0~5秒關閉，5~10秒開啟
+        // fmod 是浮點數取餘數
+        bool isDemuraOn = fmod(elapsed_seconds, 10.0) >= 5.0; 
+        
+        // 為了 debug 方便，可以在狀態切換時印出訊息 (這行是選用的)
+        static bool lastState = false;
+        if (isDemuraOn != lastState) {
+            printf(">>> 切換模式: %s <<<\n", isDemuraOn ? "Demura ON (補償)" : "Demura OFF (原圖)");
+            lastState = isDemuraOn;
+        }
+
+        // ==========================================
+        // 渲染流程
+        // ==========================================
         auto start_total = std::chrono::high_resolution_clock::now();
+        auto start_cpu = std::chrono::high_resolution_clock::now();
+        
+        bool hasNewFrame = videoReader.readNextFrame();
+        
+        auto end_cpu = std::chrono::high_resolution_clock::now();
 
-        // 為了測量純 GPU 運算，我們先確保 GPU 把上一幀的事情做完，清空管線
-        // (在正式產品中不要這樣寫，這會降低 throughput，但為了測量 latency 必須這樣做)
         glFinish(); 
-
-        // 2. 紀錄 [GPU 純運算] 的起點
         auto start_gpu = std::chrono::high_resolution_clock::now();
 
-        // --- 執行繪圖指令 ---
-        GraphicsUpdate(); 
+        // [修改] 傳入 isDemuraOn 狀態
+        GraphicsUpdate(hasNewFrame, isDemuraOn);
 
-        // 強制 CPU 等待 GPU 畫完所有像素
-        // 這樣 end_gpu 才會是真正畫完的時間點
-        glFinish(); 
-
-        // 3. 紀錄 [GPU 純運算] 的終點
+        glFinish();
         auto end_gpu = std::chrono::high_resolution_clock::now();
 
-        // --- 交換緩衝區 (顯示到螢幕) ---
-        // 如果 VSync 開啟，CPU 會在這裡停下來等待螢幕刷新 (16ms 的主要來源)
         eglSwapBuffers(CoreEGL::display, CoreEGL::surface);
 
-        // 4. 紀錄 [總幀時間] 的終點
         auto end_total = std::chrono::high_resolution_clock::now();
 
-        // ============================================================
-        // 計算與輸出
-        // ============================================================
-        double gpu_ms = std::chrono::duration_cast<std::chrono::microseconds>(end_gpu - start_gpu).count() / 1000.0;
-        double total_ms = std::chrono::duration_cast<std::chrono::microseconds>(end_total - start_total).count() / 1000.0;
-        
-        // 計算 "其他等待時間" (包含 VSync 等待、驅動程式 Overhead、Context 切換)
-        double wait_ms = total_ms - gpu_ms;
+        // ... (時間計算與 printf 保持不變) ...
+        double ms_cpu_decode = std::chrono::duration_cast<std::chrono::microseconds>(end_cpu - start_cpu).count() / 1000.0;
+        double ms_gpu_render = std::chrono::duration_cast<std::chrono::microseconds>(end_gpu - start_gpu).count() / 1000.0;
+        double ms_total = std::chrono::duration_cast<std::chrono::microseconds>(end_total - start_total).count() / 1000.0;
+        double ms_wait = ms_total - (ms_cpu_decode + ms_gpu_render);
+        if (ms_wait < 0) ms_wait = 0;
 
         frame_count++;
         
-        // 為了避免洗版，每 60 幀印出一次平均值，或單幀印出
-        // 這裡示範單幀印出
-        printf("Frame %d | GPU: %6.3f ms | Total: %6.3f ms | Idle: %6.3f ms\n", 
-               frame_count, gpu_ms, total_ms, wait_ms);
+        // 在 printf 中加入當前狀態顯示
+        printf("Frame %d [%s] | GPU: %6.3f ms | Total: %6.3f ms\n", 
+               frame_count, 
+               isDemuraOn ? "ON " : "OFF", 
+               ms_gpu_render, ms_total);
     }
 
-    // ... (保留原本的資源釋放程式碼) ...
-    glDeleteTextures(1, &inputTextureID);
-    // ...
     return 0;
 }
