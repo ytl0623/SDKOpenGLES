@@ -1,0 +1,32 @@
+# --- Compiled Binaries & Executables ---
+# Matches the specific output from your nvcc command
+demura_video
+demura_photo
+
+# Matches common C++ output patterns
+*.out
+*.exe
+*.o
+*.obj
+YUV2RGBSample
+Photo
+Video
+
+# --- Python Environment & Build Artifacts ---
+venv/
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.spec
+
+# --- Large Media & Data Files ---
+# These are often too large for Git; consider keeping them locally
+*.mp4
+
+# --- Editor & System Files ---
+.vscode/
+.idea/
+.DS_Store
+
+
