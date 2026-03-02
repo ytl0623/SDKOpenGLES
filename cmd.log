@@ -1,3 +1,10 @@
+// command
+1. cd SDKOpenGLES/YUV2RGBSample/
+2. source ../run_exports.sh
+3. make clean
+4. make
+
+
 ./Video Supportingfiles/cat.mp4 Supportingfiles/test/W32.bmp Supportingfiles/test/W64.bmp Supportingfiles/test/W128.bmp Supportingfiles/test/W192.bmp Supportingfiles/test/W255.bmp
 
 ./Photo Supportingfiles/test/gradient.bmp Supportingfiles/test/W32.bmp Supportingfiles/test/W64.bmp Supportingfiles/test/W128.bmp Supportingfiles/test/W192.bmp Supportingfiles/test/W255.bmp
@@ -5,9 +12,6 @@
 ./Photo Supportingfiles/test/red_128.bmp Supportingfiles/135/Correction-Red-32.bmp Supportingfiles/135/Correction-Red-64.bmp Supportingfiles/135/Correction-Red-128.bmp Supportingfiles/135/Correction-Red-192.bmp Supportingfiles/135/Correction-Red-255.bmp
 
 ./Photo Supportingfiles/test/gradient.bmp Supportingfiles/test/W32.bmp Supportingfiles/test/W64.bmp Supportingfiles/test/W128.bmp Supportingfiles/test/W192.bmp Supportingfiles/test/W255.bmp
-
-cd SDKOpenGLES/YUV2RGBSample/
-source ../run_exports.sh
 
 ./Video Supportingfiles/cat.mp4 Supportingfiles/test/Correction-Gray-32.bmp Supportingfiles/test/Correction-Gray-64.bmp Supportingfiles/test/Correction-Gray-128.bmp Supportingfiles/test/Correction-Gray-192.bmp Supportingfiles/test/Correction-Gray-255.bmp
 

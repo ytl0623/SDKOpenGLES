@@ -8,7 +8,7 @@ demura_photo
 *.exe
 *.o
 *.obj
-YUV2RGBSample
+YUV2RGBSample/YUV2RGBSample
 Photo
 Video
 

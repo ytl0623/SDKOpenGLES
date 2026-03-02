@@ -15,6 +15,7 @@ all: YUV2RGBSample $(srcfiles)
 
 YUV2RGBSample $(objects) : YUV2RGBonGPUSample.cpp $(srcfiles)
 	$(ARM_CROSS_COMPILER_PATH) -g YUV2RGBonGPUSample.cpp $(srcfiles) $(CXXFLAGS) $(LD_FLAGS) -o YUV2RGBSample $(INC) $(PROJ_INCLUDES) $(LIB)
+	@echo "\n🎉 Build Successful!"
 # 		cp -rf Supportingfiles bin
 # 		cp -rf YUV2RGBSample bin
 
