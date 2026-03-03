@@ -587,6 +587,11 @@
 #include <stdio.h>
 #include <cmath>
 
+// --- 新增：用於 Linux 終端機鍵盤偵測的標頭檔 ---
+#include <termios.h>
+#include <unistd.h>
+#include <fcntl.h>
+
 // 自定義標頭檔
 #include "XLinuxPodium.h"
 #include "XGLSLCompile.h"
@@ -595,12 +600,38 @@
 // ============================================================================
 // 常數定義
 // ============================================================================
-// 定義場景視窗的解析度 (Full HD)
 #define SCENE_WIDTH 1920
 #define SCENE_HEIGHT 1080
 
 using std::string;
 using std::vector;
+
+// ============================================================================
+// Linux 終端機非阻塞鍵盤偵測函數 (kbhit)
+// ============================================================================
+int kbhit(void) {
+    struct termios oldt, newt;
+    int ch;
+    int oldf;
+
+    tcgetattr(STDIN_FILENO, &oldt);
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON | ECHO); // 關閉緩衝區與回顯
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+    oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
+    fcntl(STDIN_FILENO, F_SETFL, oldf | O_NONBLOCK); // 設為非阻塞
+
+    ch = getchar();
+
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    fcntl(STDIN_FILENO, F_SETFL, oldf);
+
+    if (ch != EOF) {
+        ungetc(ch, stdin);
+        return 1;
+    }
+    return 0;
+}
 
 // ============================================================================
 // 工具類別：計時器 (Timer)
@@ -619,12 +650,6 @@ public:
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
         printf("[%s] 耗時: %.3f ms\n", name, duration.count() / 1000.0);
-    }
-    
-    double getElapsedMs() {
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-        return duration.count() / 1000.0;
     }
 };
 
@@ -667,8 +692,11 @@ GLint iLocPosition = -1;
 GLint iLocTexCoord = -1;
 
 GLint iLocInputTexture = -1;
-GLint iLocControlPoint[5] = {-1, -1, -1, -1, -1}; // 5 個控制點
+GLint iLocControlPoint[5] = {-1, -1, -1, -1, -1};
 GLint iLocFixedX = -1;
+
+// --- 新增：Shader 開關變數位置 ---
+GLint iLocEnableDemura = -1; 
 
 GLuint inputTextureID;
 GLuint controlPointTextureID[5];
@@ -676,7 +704,6 @@ GLuint controlPointTextureID[5];
 int imageWidth = 0;
 int imageHeight = 0;
 
-// 定義 X 軸的 5 個固定節點 (標準化到 0.0 ~ 1.0)
 const float FIXED_X[5] = {
     32.0f/255.0f,
     64.0f/255.0f,
@@ -714,19 +741,11 @@ bool loadBMP(const char* filename, vector<unsigned char>& data, int& width, int&
     
     if (fread(&fileHeader, sizeof(BMPFileHeader), 1, file) != 1 ||
         fread(&infoHeader, sizeof(BMPInfoHeader), 1, file) != 1) {
-        printf("錯誤: 讀取 BMP 標頭失敗 %s\n", filename);
         fclose(file);
         return false;
     }
     
-    if (fileHeader.type != 0x4D42) {
-        printf("錯誤: 不是有效的 BMP 檔案 %s\n", filename);
-        fclose(file);
-        return false;
-    }
-     
-    if (infoHeader.bits != 24) {
-        printf("錯誤: 僅支援 24-bit BMP %s\n", filename);
+    if (fileHeader.type != 0x4D42 || infoHeader.bits != 24) {
         fclose(file);
         return false;
     }
@@ -753,8 +772,6 @@ bool loadBMP(const char* filename, vector<unsigned char>& data, int& width, int&
             data[dstIdx + 2] = rawData[srcIdx];
         }
     }
-    
-    printf("成功載入: %s (%dx%d)\n", filename, width, height);
     return true;
 }
 
@@ -788,6 +805,9 @@ uniform sampler2D uControlPoint3;
 uniform sampler2D uControlPoint4;
 
 uniform float uFixedX[5];
+
+// --- 新增：接收來自 C++ 的開關 ---
+uniform int uEnableDemura;
 
 float interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
     float x0 = uFixedX[0];
@@ -828,8 +848,17 @@ float interpolate(float x, float y0, float y1, float y2, float y3, float y4) {
 }
 
 void main() {
+    // 取得原圖顏色
     vec3 inputColor = texture2D(uInputTexture, vTexCoord).rgb;
 
+    // --- 新增：判斷是否開啟 DEMURA ---
+    if (uEnableDemura == 0) {
+        // 如果沒有開啟，直接輸出原圖顏色並結束
+        gl_FragColor = vec4(inputColor, 1.0);
+        return;
+    }
+
+    // 以下為 DEMURA 處理邏輯
     float r0 = texture2D(uControlPoint0, vTexCoord).r;
     float r1 = texture2D(uControlPoint1, vTexCoord).r;
     float r2 = texture2D(uControlPoint2, vTexCoord).r;
@@ -867,14 +896,6 @@ GLuint compileShader(GLenum type, const char* source) {
     GLint compiled;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
     if (!compiled) {
-        GLint infoLen = 0;
-        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLen);
-        if (infoLen > 0) {
-            char* infoLog = (char*)malloc(infoLen);
-            glGetShaderInfoLog(shader, infoLen, NULL, infoLog);
-            printf("Shader 編譯失敗:\n%s\n", infoLog);
-            free(infoLog);
-        }
         glDeleteShader(shader);
         return 0;
     }
@@ -885,7 +906,7 @@ GLuint compileShader(GLenum type, const char* source) {
 // 函數：初始化圖形系統
 // ============================================================================
 bool prepareGraphics(const char* inputFile, const char* controlFiles[5]) {
-    printf("正在初始化圖形資源 (解析度: %dx%d)...\n", SCENE_WIDTH, SCENE_HEIGHT);
+    printf("正在初始化圖形資源...\n");
     
     vector<unsigned char> inputData;
     if (!loadBMP(inputFile, inputData, imageWidth, imageHeight)) return false;
@@ -894,10 +915,6 @@ bool prepareGraphics(const char* inputFile, const char* controlFiles[5]) {
     for (int i = 0; i < 5; i++) {
         int w, h;
         if (!loadBMP(controlFiles[i], controlData[i], w, h)) return false;
-        if (w != imageWidth || h != imageHeight) {
-            printf("錯誤: 控制點圖片尺寸 (%dx%d) 與原圖不符\n", w, h);
-            return false;
-        }
     }
     
     GLuint vertShader = compileShader(GL_VERTEX_SHADER, vertexShaderSource);
@@ -921,6 +938,9 @@ bool prepareGraphics(const char* inputFile, const char* controlFiles[5]) {
     iLocControlPoint[4] = glGetUniformLocation(programID, "uControlPoint4");
     iLocFixedX = glGetUniformLocation(programID, "uFixedX");
     
+    // --- 新增：取得開關變數位置 ---
+    iLocEnableDemura = glGetUniformLocation(programID, "uEnableDemura");
+
     glEnableVertexAttribArray(iLocPosition);
     glVertexAttribPointer(iLocPosition, 2, GL_FLOAT, GL_FALSE, 0, vertexVertices);
     
@@ -930,7 +950,6 @@ bool prepareGraphics(const char* inputFile, const char* controlFiles[5]) {
     glGenTextures(1, &inputTextureID);
     glBindTexture(GL_TEXTURE_2D, inputTextureID);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, imageWidth, imageHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, &inputData[0]);
-    
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -940,7 +959,6 @@ bool prepareGraphics(const char* inputFile, const char* controlFiles[5]) {
         glGenTextures(1, &controlPointTextureID[i]);
         glBindTexture(GL_TEXTURE_2D, controlPointTextureID[i]);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, imageWidth, imageHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, &controlData[i][0]);
-        
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -949,15 +967,14 @@ bool prepareGraphics(const char* inputFile, const char* controlFiles[5]) {
     
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glDisable(GL_DEPTH_TEST);
-    
-    printf("OpenGL 初始化完成。\n");
     return true;
 }
 
 // ============================================================================
 // 函數：圖形渲染迴圈
+// --- 修改：接收 enableDemura 參數 ---
 // ============================================================================
-void GraphicsUpdate() {
+void GraphicsUpdate(bool enableDemura) {
     glClear(GL_COLOR_BUFFER_BIT);
     glViewport(0, 0, SCENE_WIDTH, SCENE_HEIGHT);
     
@@ -972,6 +989,10 @@ void GraphicsUpdate() {
     }
     
     glUniform1fv(iLocFixedX, 5, (GLfloat*)FIXED_X);
+
+    // --- 新增：將開關狀態傳送給 Shader ---
+    glUniform1i(iLocEnableDemura, enableDemura ? 1 : 0);
+
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4); 
 }
 
@@ -979,7 +1000,6 @@ void GraphicsUpdate() {
 // 主程式 (Entry Point)
 // ============================================================================
 int main(int argc, char* argv[]) {
-    // 參數變為 7 個 (執行檔 + 原圖 + 5 張控制圖)
     if (argc != 7) {
         printf("使用方法: %s <輸入BMP> <點1> <點2> <點3> <點4> <點5>\n", argv[0]);
         return 1;
@@ -991,26 +1011,41 @@ int main(int argc, char* argv[]) {
     CoreEGL::initializeEGL(CoreEGL::OPENGLES2);
     eglMakeCurrent(CoreEGL::display, CoreEGL::surface, CoreEGL::surface, CoreEGL::context);
 
-    // 關閉 VSync
-    // eglSwapInterval(CoreEGL::display, 1);
-    eglSwapInterval(CoreEGL::display, 0);
+    eglSwapInterval(CoreEGL::display, 0); // 關閉 VSync
 
     if (!prepareGraphics(argv[1], controlFiles)) return 1;
 
-    printf("\n--- 開始效能測量 ---\n");
+    printf("\n=======================================================\n");
+    printf("  使用提示：請在「終端機視窗」中按下【空白鍵 (Space)】\n");
+    printf("  即可切換 (Toggle) DEMURA 校正效果與顯示原圖。\n");
+    printf("=======================================================\n\n");
     
     bool end = false;
     int frame_count = 0;
 
+    // --- 新增：控制 DEMURA 是否開啟的布林變數 (預設開啟) ---
+    bool isDemuraEnabled = true;
+
     while (!end) {
         if (podium->checkWindow() != XPodium::WINDOW_IDLE) end = true;
+
+        // --- 新增：偵測鍵盤輸入 (非阻塞) ---
+        if (kbhit()) {
+            char ch = getchar();
+            if (ch == ' ') { // 如果按下空白鍵
+                isDemuraEnabled = !isDemuraEnabled; // 切換狀態
+                printf("\n>>> 目前狀態： %s <<<\n\n", isDemuraEnabled ? "DEMURA 校正中" : "顯示原圖");
+            }
+        }
 
         auto start_total = std::chrono::high_resolution_clock::now();
         glFinish(); 
         
         auto start_gpu = std::chrono::high_resolution_clock::now();
         
-        GraphicsUpdate(); 
+        // --- 修改：傳入開關狀態 ---
+        GraphicsUpdate(isDemuraEnabled); 
+
         glFinish(); 
         
         auto end_gpu = std::chrono::high_resolution_clock::now();
@@ -1025,8 +1060,11 @@ int main(int argc, char* argv[]) {
 
         frame_count++;
         
-        printf("Frame %d | GPU: %6.3f ms | Total: %6.3f ms | Idle: %6.3f ms\n", 
-               frame_count, gpu_ms, total_ms, wait_ms);
+        // 每 60 幀印出一次，避免文字洗版干擾鍵盤偵測
+        if (frame_count % 60 == 0) {
+            printf("Frame %d | GPU: %6.3f ms | Total: %6.3f ms\r", frame_count, gpu_ms, total_ms);
+            fflush(stdout); // 強制刷新輸出緩衝
+        }
     }
 
     // 資源釋放
