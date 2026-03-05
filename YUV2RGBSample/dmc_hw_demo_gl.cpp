@@ -216,100 +216,169 @@ static const char *fragSrc = R"(
 precision highp float;
 varying vec2 vTexCoord;
 
-/* Textures */
-uniform sampler2D uIdxHigh;   /* Idx >> 8,  RGB packed */
-uniform sampler2D uIdxLow;    /* Idx & 0xFF, RGB packed */
-uniform sampler2D uRuleTable; /* 4096 x 7,  RGB packed */
+/* ══════════════════════════════════════════════════════════
+ * GLES 2.0 Safe Fragment Shader
+ *
+ * GLES 2.0 限制:
+ *   - 不能用 int 當函式回傳型別
+ *   - 不能用 runtime variable 做 uniform array index
+ *   - 不能傳陣列給函式
+ *   - 不能宣告 local array
+ * 全部改用 float + if-else chain 解決
+ * ══════════════════════════════════════════════════════════ */
 
-/* Parameters */
-uniform float uDMC_LEVEL[10];
-uniform float uCOEF[8];
-uniform float uOffset_R[7];
-uniform float uOffset_G[7];
-uniform float uOffset_B[7];
-uniform float uMag_R[7];
-uniform float uMag_G[7];
-uniform float uMag_B[7];
+/* Textures */
+uniform sampler2D uIdxHigh;
+uniform sampler2D uIdxLow;
+uniform sampler2D uRuleTable;
+
+/* DMC Levels: 10 個固定節點 */
+uniform float uLV0, uLV1, uLV2, uLV3, uLV4;
+uniform float uLV5, uLV6, uLV7, uLV8, uLV9;
+
+/* COEF: 8 個 */
+uniform float uCO0, uCO1, uCO2, uCO3, uCO4, uCO5, uCO6, uCO7;
+
+/* Offset (已在 CPU 解碼為有號浮點) */
+uniform float uOR0,uOR1,uOR2,uOR3,uOR4,uOR5,uOR6;
+uniform float uOG0,uOG1,uOG2,uOG3,uOG4,uOG5,uOG6;
+uniform float uOB0,uOB1,uOB2,uOB3,uOB4,uOB5,uOB6;
+
+/* Mag */
+uniform float uMR0,uMR1,uMR2,uMR3,uMR4,uMR5,uMR6;
+uniform float uMG0,uMG1,uMG2,uMG3,uMG4,uMG5,uMG6;
+uniform float uMB0,uMB1,uMB2,uMB3,uMB4,uMB5,uMB6;
 
 /* Config */
-uniform float uWidth, uHeight;
 uniform float uIdxW, uIdxH;
 uniform float uHSize, uVSize;
-uniform float uGrayLevel;  /* 0-255 */
-uniform int   uDMC_EN;
+uniform float uGrayLevel;
 
-/* ────────────────────────────────────────────
- * Helper: 模擬 C# Round (銀行家捨入)
- * ──────────────────────────────────────────── */
+/* ──────────── 常用 helper ──────────── */
+
 float hw_round(float n) {
     return (n > 0.0) ? floor(n + 0.5) : ceil(n - 0.5);
 }
 
-/* ────────────────────────────────────────────
- * Helper: 從拆開的 High/Low texture 讀取 12-bit Index
- * ch: 0=R, 1=G, 2=B
- * ──────────────────────────────────────────── */
-float readIdx(vec2 uv, int ch) {
-    vec3 hi = texture2D(uIdxHigh, uv);
-    vec3 lo = texture2D(uIdxLow, uv);
-    float h, l;
-    if      (ch == 0) { h = hi.r; l = lo.r; }
-    else if (ch == 1) { h = hi.g; l = lo.g; }
-    else              { h = hi.b; l = lo.b; }
-    return floor(h * 255.0 + 0.5) * 256.0 + floor(l * 255.0 + 0.5);
+/* 用 float index 讀取 DMC_LEVEL (if-else chain, GLES 2.0 safe) */
+float getLV(float idx) {
+    if (idx < 0.5) return uLV0;
+    if (idx < 1.5) return uLV1;
+    if (idx < 2.5) return uLV2;
+    if (idx < 3.5) return uLV3;
+    if (idx < 4.5) return uLV4;
+    if (idx < 5.5) return uLV5;
+    if (idx < 6.5) return uLV6;
+    if (idx < 7.5) return uLV7;
+    if (idx < 8.5) return uLV8;
+    return uLV9;
 }
 
-/* ────────────────────────────────────────────
- * Helper: 讀取 Rule Table
- * idx: rule index (0-4095), lv: level (0-6), ch: 0=R 1=G 2=B
- * ──────────────────────────────────────────── */
-float readRule(float idx, int lv, int ch) {
-    vec2 uv = vec2((idx + 0.5) / 4096.0, (float(lv) + 0.5) / 7.0);
-    vec3 val = texture2D(uRuleTable, uv);
-    if      (ch == 0) return floor(val.r * 255.0 + 0.5);
-    else if (ch == 1) return floor(val.g * 255.0 + 0.5);
-    else              return floor(val.b * 255.0 + 0.5);
+float getCOEF(float idx) {
+    if (idx < 0.5) return uCO0;
+    if (idx < 1.5) return uCO1;
+    if (idx < 2.5) return uCO2;
+    if (idx < 3.5) return uCO3;
+    if (idx < 4.5) return uCO4;
+    if (idx < 5.5) return uCO5;
+    if (idx < 6.5) return uCO6;
+    return uCO7;
 }
 
-/* ────────────────────────────────────────────
- * Helper: Idx Table UV (精確 texel 定址)
- * ──────────────────────────────────────────── */
+/* ch: 0.0=R, 1.0=G, 2.0=B */
+float getOffset(float ch, float idx) {
+    if (ch < 0.5) {
+        if (idx<0.5) return uOR0; if (idx<1.5) return uOR1;
+        if (idx<2.5) return uOR2; if (idx<3.5) return uOR3;
+        if (idx<4.5) return uOR4; if (idx<5.5) return uOR5;
+        return uOR6;
+    } else if (ch < 1.5) {
+        if (idx<0.5) return uOG0; if (idx<1.5) return uOG1;
+        if (idx<2.5) return uOG2; if (idx<3.5) return uOG3;
+        if (idx<4.5) return uOG4; if (idx<5.5) return uOG5;
+        return uOG6;
+    } else {
+        if (idx<0.5) return uOB0; if (idx<1.5) return uOB1;
+        if (idx<2.5) return uOB2; if (idx<3.5) return uOB3;
+        if (idx<4.5) return uOB4; if (idx<5.5) return uOB5;
+        return uOB6;
+    }
+}
+
+float getMag(float ch, float idx) {
+    if (ch < 0.5) {
+        if (idx<0.5) return uMR0; if (idx<1.5) return uMR1;
+        if (idx<2.5) return uMR2; if (idx<3.5) return uMR3;
+        if (idx<4.5) return uMR4; if (idx<5.5) return uMR5;
+        return uMR6;
+    } else if (ch < 1.5) {
+        if (idx<0.5) return uMG0; if (idx<1.5) return uMG1;
+        if (idx<2.5) return uMG2; if (idx<3.5) return uMG3;
+        if (idx<4.5) return uMG4; if (idx<5.5) return uMG5;
+        return uMG6;
+    } else {
+        if (idx<0.5) return uMB0; if (idx<1.5) return uMB1;
+        if (idx<2.5) return uMB2; if (idx<3.5) return uMB3;
+        if (idx<4.5) return uMB4; if (idx<5.5) return uMB5;
+        return uMB6;
+    }
+}
+
+/* ──────────── Texture 讀取 ──────────── */
+
 vec2 idxUV(float col, float row) {
     return vec2((col + 0.5) / uIdxW, (row + 0.5) / uIdxH);
 }
 
-/* ────────────────────────────────────────────
- * Find_plane: 找灰階區間 (回傳 0-9)
- * ──────────────────────────────────────────── */
-int find_plane(float pt) {
-    if (pt >  uDMC_LEVEL[9])                                      return 9;
-    if (pt >= uDMC_LEVEL[8] && uDMC_LEVEL[8] != uDMC_LEVEL[9])   return 8;
-    if (pt >= uDMC_LEVEL[7]) return 7;
-    if (pt >= uDMC_LEVEL[6]) return 6;
-    if (pt >= uDMC_LEVEL[5]) return 5;
-    if (pt >= uDMC_LEVEL[4]) return 4;
-    if (pt >= uDMC_LEVEL[3]) return 3;
-    if (pt >= uDMC_LEVEL[2]) return 2;
-    if (pt >= uDMC_LEVEL[1]) return 1;
-    return 0;
+/* 讀取 12-bit Index, ch: 0.0=R 1.0=G 2.0=B */
+float readIdx(vec2 uv, float ch) {
+    vec3 hi = texture2D(uIdxHigh, uv).rgb;
+    vec3 lo = texture2D(uIdxLow, uv).rgb;
+    float h, l;
+    if (ch < 0.5)      { h = hi.r; l = lo.r; }
+    else if (ch < 1.5)  { h = hi.g; l = lo.g; }
+    else                { h = hi.b; l = lo.b; }
+    return floor(h * 255.0 + 0.5) * 256.0 + floor(l * 255.0 + 0.5);
 }
 
-/* ────────────────────────────────────────────
- * Block interpolation (雙線性)
- * ──────────────────────────────────────────── */
+/* 讀取 Rule Table, ch: 0.0=R 1.0=G 2.0=B */
+float readRule(float idx, float lv, float ch) {
+    vec2 uv = vec2((idx + 0.5) / 4096.0, (lv + 0.5) / 7.0);
+    vec3 val = texture2D(uRuleTable, uv).rgb;
+    if (ch < 0.5)      return floor(val.r * 255.0 + 0.5);
+    else if (ch < 1.5)  return floor(val.g * 255.0 + 0.5);
+    else                return floor(val.b * 255.0 + 0.5);
+}
+
+/* ──────────── Find plane (全 float) ──────────── */
+
+float find_plane(float pt) {
+    if (pt >  uLV9)                          return 9.0;
+    if (pt >= uLV8 && uLV8 != uLV9)         return 8.0;
+    if (pt >= uLV7)                          return 7.0;
+    if (pt >= uLV6)                          return 6.0;
+    if (pt >= uLV5)                          return 5.0;
+    if (pt >= uLV4)                          return 4.0;
+    if (pt >= uLV3)                          return 3.0;
+    if (pt >= uLV2)                          return 2.0;
+    if (pt >= uLV1)                          return 1.0;
+    return 0.0;
+}
+
+/* ──────────── Block interpolation ──────────── */
+
 float block_interp(float A, float B, float C, float D,
                    float H, float V) {
     float HAB = A + (B - A) * H;
     HAB = hw_round(HAB * 4.0) / 4.0;
     float HCD = C + (D - C) * H;
     HCD = hw_round(HCD * 4.0) / 4.0;
-    float out_ = HAB + (HCD - HAB) * V;
-    return hw_round(out_ * 4.0) / 4.0;
+    float r = HAB + (HCD - HAB) * V;
+    return hw_round(r * 4.0) / 4.0;
 }
 
-/* ────────────────────────────────────────────
- * Mag_point
- * ──────────────────────────────────────────── */
+/* ──────────── Mag point ──────────── */
+
 float mag_point(float mag, float val) {
     float d;
     if      (mag < 0.5) d = val * 4.0;
@@ -322,9 +391,8 @@ float mag_point(float mag, float val) {
     return floor(d * 16.0) / 16.0;
 }
 
-/* ────────────────────────────────────────────
- * Plane linear interpolation
- * ──────────────────────────────────────────── */
+/* ──────────── Plane linear interpolation ──────────── */
+
 float plane_lerp(float x, float x1, float v1, float v2, float coef) {
     float y = x - x1;
     if (y < 0.0) y = 0.0;
@@ -340,62 +408,57 @@ float plane_lerp(float x, float x1, float v1, float v2, float coef) {
     return hw_round(y * 4.0) / 4.0;
 }
 
-/* ────────────────────────────────────────────
- * 單通道 DMC 計算
- * ch: 0=R, 1=G, 2=B
- * ──────────────────────────────────────────── */
-float dmc_channel(float in12, int ch,
-                  float Offset[7], float Mag[7],
-                  float px, float py) {
-    int bl = find_plane(in12);
-    if (bl == 0 || bl == 9) return in12;
+/* ══════════════════════════════════════════════════════════
+ * 單通道 DMC 計算 (全 float, 無陣列傳參, GLES 2.0 safe)
+ * ch: 0.0=R, 1.0=G, 2.0=B
+ * ══════════════════════════════════════════════════════════ */
+float dmc_channel(float in12, float ch, float px, float py) {
+    float bl = find_plane(in12);
+    if (bl < 0.5 || bl > 8.5) return in12;
 
     float HS = uHSize;
     float VS = uVSize;
-
-    /* Block 座標 */
     float bx = floor(px / HS);
     float by = floor(py / VS);
 
-    /* 4 鄰居 Index */
     float iA = readIdx(idxUV(bx, by), ch);
-    float iB = (HS > 1.0) ? readIdx(idxUV(bx+1.0, by), ch) : 0.0;
-    float iC = (VS > 1.0) ? readIdx(idxUV(bx, by+1.0), ch) : 0.0;
-    float iD = (HS > 1.0 && VS > 1.0) ? readIdx(idxUV(bx+1.0, by+1.0), ch) : 0.0;
+    float iB = (HS > 1.5) ? readIdx(idxUV(bx+1.0, by), ch) : 0.0;
+    float iC = (VS > 1.5) ? readIdx(idxUV(bx, by+1.0), ch) : 0.0;
+    float iD = (HS > 1.5 && VS > 1.5) ? readIdx(idxUV(bx+1.0, by+1.0), ch) : 0.0;
 
     float Hf = mod(px, HS) / HS;
     float Vf = mod(py, VS) / VS;
 
     /* V1 */
     float V1;
-    if (bl == 1) {
-        V1 = uDMC_LEVEL[bl];
+    if (bl < 1.5) {
+        V1 = getLV(bl);
     } else {
-        int lv = bl - 2;
-        float rA = readRule(iA, lv, ch);
-        float rB = readRule(iB, lv, ch);
-        float rC = readRule(iC, lv, ch);
-        float rD = readRule(iD, lv, ch);
+        float lv1 = bl - 2.0;
+        float rA = readRule(iA, lv1, ch);
+        float rB = readRule(iB, lv1, ch);
+        float rC = readRule(iC, lv1, ch);
+        float rD = readRule(iD, lv1, ch);
         float V1d = block_interp(rA, rB, rC, rD, Hf, Vf);
-        V1 = uDMC_LEVEL[bl] + Offset[bl-2];
+        V1 = getLV(bl) + getOffset(ch, bl - 2.0);
         if (V1 > 1023.75) V1 = 1023.75;
-        V1 = mag_point(Mag[bl-2], V1d) + V1;
+        V1 = mag_point(getMag(ch, bl - 2.0), V1d) + V1;
     }
 
     /* V2 */
     float V2;
-    if (bl == 8) {
-        V2 = uDMC_LEVEL[bl+1];
+    if (bl > 7.5) {
+        V2 = getLV(bl + 1.0);
     } else {
-        int lv = bl - 1;
-        float rA = readRule(iA, lv, ch);
-        float rB = readRule(iB, lv, ch);
-        float rC = readRule(iC, lv, ch);
-        float rD = readRule(iD, lv, ch);
+        float lv2 = bl - 1.0;
+        float rA = readRule(iA, lv2, ch);
+        float rB = readRule(iB, lv2, ch);
+        float rC = readRule(iC, lv2, ch);
+        float rD = readRule(iD, lv2, ch);
         float V2d = block_interp(rA, rB, rC, rD, Hf, Vf);
-        V2 = uDMC_LEVEL[bl+1] + Offset[bl-1];
+        V2 = getLV(bl + 1.0) + getOffset(ch, bl - 1.0);
         if (V2 > 1023.75) V2 = 1023.75;
-        V2 = mag_point(Mag[bl-1], V2d) + V2;
+        V2 = mag_point(getMag(ch, bl - 1.0), V2d) + V2;
     }
 
     if (V1 > 1023.9375) V1 = 1023.9375;
@@ -403,39 +466,21 @@ float dmc_channel(float in12, int ch,
     if (V2 > 1023.9375) V2 = 1023.9375;
     if (V2 < 0.0) V2 = 0.0;
 
-    return plane_lerp(in12, uDMC_LEVEL[bl], V1, V2, uCOEF[bl-1]);
+    return plane_lerp(in12, getLV(bl), V1, V2, getCOEF(bl - 1.0));
 }
 
-/* ════════════════════════════════════════════
- * main: 三通道處理
- * ════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════
+ * main
+ * ══════════════════════════════════════════════════════════ */
 void main() {
-    /* pixel 座標 (0-based) */
     float px = floor(gl_FragCoord.x);
     float py = floor(gl_FragCoord.y);
-
-    /* 與 C# 一致: 全圖填同一灰階 */
     float in12 = uGrayLevel * 4.0;
 
-    /* Offset 還原 (在 CPU 端已解碼) */
-    float offR[7], offG[7], offB[7];
-    for (int i = 0; i < 7; i++) {
-        offR[i] = uOffset_R[i];
-        offG[i] = uOffset_G[i];
-        offB[i] = uOffset_B[i];
-    }
-    float magR[7], magG[7], magB[7];
-    for (int i = 0; i < 7; i++) {
-        magR[i] = uMag_R[i];
-        magG[i] = uMag_G[i];
-        magB[i] = uMag_B[i];
-    }
+    float r = dmc_channel(in12, 0.0, px, py);
+    float g = dmc_channel(in12, 1.0, px, py);
+    float b = dmc_channel(in12, 2.0, px, py);
 
-    float r = dmc_channel(in12, 0, offR, magR, px, py);
-    float g = dmc_channel(in12, 1, offG, magG, px, py);
-    float b = dmc_channel(in12, 2, offB, magB, px, py);
-
-    /* 12-bit → 8-bit (÷4) → 0.0~1.0 (÷255) */
     gl_FragColor = vec4(
         clamp(r / 4.0 / 255.0, 0.0, 1.0),
         clamp(g / 4.0 / 255.0, 0.0, 1.0),
@@ -507,44 +552,78 @@ static bool setup_gl(const DMC_State &s)
     glUniform1i(glGetUniformLocation(programID, "uIdxLow"),    1);
     glUniform1i(glGetUniformLocation(programID, "uRuleTable"), 2);
 
-    /* Uniforms: DMC Parameters */
+    /* Uniforms: DMC Parameters (逐一設定, 不用陣列) */
     float DMC_LEVEL[10] = {
         0, s.Level_B*4.0f, s.Level_1*4.0f, s.Level_2*4.0f,
         s.Level_3*4.0f, s.Level_4*4.0f, s.Level_5*4.0f,
         s.Level_6*4.0f, s.Level_7*4.0f, s.Level_W*4.0f+3.0f
     };
-    glUniform1fv(glGetUniformLocation(programID, "uDMC_LEVEL"), 10, DMC_LEVEL);
-    glUniform1fv(glGetUniformLocation(programID, "uCOEF"), 8, s.COEF);
+    glUniform1f(glGetUniformLocation(programID, "uLV0"), DMC_LEVEL[0]);
+    glUniform1f(glGetUniformLocation(programID, "uLV1"), DMC_LEVEL[1]);
+    glUniform1f(glGetUniformLocation(programID, "uLV2"), DMC_LEVEL[2]);
+    glUniform1f(glGetUniformLocation(programID, "uLV3"), DMC_LEVEL[3]);
+    glUniform1f(glGetUniformLocation(programID, "uLV4"), DMC_LEVEL[4]);
+    glUniform1f(glGetUniformLocation(programID, "uLV5"), DMC_LEVEL[5]);
+    glUniform1f(glGetUniformLocation(programID, "uLV6"), DMC_LEVEL[6]);
+    glUniform1f(glGetUniformLocation(programID, "uLV7"), DMC_LEVEL[7]);
+    glUniform1f(glGetUniformLocation(programID, "uLV8"), DMC_LEVEL[8]);
+    glUniform1f(glGetUniformLocation(programID, "uLV9"), DMC_LEVEL[9]);
 
-    /* Offset: CPU 端先解碼為有號浮點 (與 C# HW_demo 一致) */
+    glUniform1f(glGetUniformLocation(programID, "uCO0"), s.COEF[0]);
+    glUniform1f(glGetUniformLocation(programID, "uCO1"), s.COEF[1]);
+    glUniform1f(glGetUniformLocation(programID, "uCO2"), s.COEF[2]);
+    glUniform1f(glGetUniformLocation(programID, "uCO3"), s.COEF[3]);
+    glUniform1f(glGetUniformLocation(programID, "uCO4"), s.COEF[4]);
+    glUniform1f(glGetUniformLocation(programID, "uCO5"), s.COEF[5]);
+    glUniform1f(glGetUniformLocation(programID, "uCO6"), s.COEF[6]);
+    glUniform1f(glGetUniformLocation(programID, "uCO7"), s.COEF[7]);
+
+    /* Offset: CPU 端先解碼 */
+    auto decode = [](float raw) -> float {
+        if (raw >= 2048)
+            return -((float)((~(unsigned)(int)raw) % 2048 + 1) / 4.0f);
+        else
+            return raw / 4.0f;
+    };
     float offR[7], offG[7], offB[7];
     for (int i = 0; i < 7; i++) {
-        auto decode = [](float raw) -> float {
-            if (raw >= 2048)
-                return -((float)((~(unsigned)(int)raw) % 2048 + 1) / 4.0f);
-            else
-                return raw / 4.0f;
-        };
         offR[i] = decode(s.Offset_R[i]);
         offG[i] = decode(s.Offset_G[i]);
         offB[i] = decode(s.Offset_B[i]);
     }
-    glUniform1fv(glGetUniformLocation(programID, "uOffset_R"), 7, offR);
-    glUniform1fv(glGetUniformLocation(programID, "uOffset_G"), 7, offG);
-    glUniform1fv(glGetUniformLocation(programID, "uOffset_B"), 7, offB);
+    const char *orN[] = {"uOR0","uOR1","uOR2","uOR3","uOR4","uOR5","uOR6"};
+    const char *ogN[] = {"uOG0","uOG1","uOG2","uOG3","uOG4","uOG5","uOG6"};
+    const char *obN[] = {"uOB0","uOB1","uOB2","uOB3","uOB4","uOB5","uOB6"};
+    const char *mrN[] = {"uMR0","uMR1","uMR2","uMR3","uMR4","uMR5","uMR6"};
+    const char *mgN[] = {"uMG0","uMG1","uMG2","uMG3","uMG4","uMG5","uMG6"};
+    const char *mbN[] = {"uMB0","uMB1","uMB2","uMB3","uMB4","uMB5","uMB6"};
+    for (int i = 0; i < 7; i++) {
+        glUniform1f(glGetUniformLocation(programID, orN[i]), offR[i]);
+        glUniform1f(glGetUniformLocation(programID, ogN[i]), offG[i]);
+        glUniform1f(glGetUniformLocation(programID, obN[i]), offB[i]);
+        glUniform1f(glGetUniformLocation(programID, mrN[i]), s.Mag_R[i]);
+        glUniform1f(glGetUniformLocation(programID, mgN[i]), s.Mag_G[i]);
+        glUniform1f(glGetUniformLocation(programID, mbN[i]), s.Mag_B[i]);
+    }
 
-    glUniform1fv(glGetUniformLocation(programID, "uMag_R"), 7, s.Mag_R);
-    glUniform1fv(glGetUniformLocation(programID, "uMag_G"), 7, s.Mag_G);
-    glUniform1fv(glGetUniformLocation(programID, "uMag_B"), 7, s.Mag_B);
-
-    glUniform1f(glGetUniformLocation(programID, "uWidth"),  (float)s.Width);
-    glUniform1f(glGetUniformLocation(programID, "uHeight"), (float)s.Height);
+    /* Debug: 印出關鍵參數確認 */
+    printf("DMC_LEVEL: ");
+    for(int i=0;i<10;i++) printf("%.0f ", DMC_LEVEL[i]);
+    printf("\nCOEF: ");
+    for(int i=0;i<8;i++) printf("%.0f ", s.COEF[i]);
+    printf("\nOffset_R: ");
+    for(int i=0;i<7;i++) printf("%.2f ", offR[i]);
+    printf("\nMag_R: ");
+    for(int i=0;i<7;i++) printf("%.0f ", s.Mag_R[i]);
+    printf("\n");
     glUniform1f(glGetUniformLocation(programID, "uIdxW"),   (float)s.Idx_table_W);
     glUniform1f(glGetUniformLocation(programID, "uIdxH"),   (float)s.Idx_table_H);
     glUniform1f(glGetUniformLocation(programID, "uHSize"),  (float)s.H_size);
     glUniform1f(glGetUniformLocation(programID, "uVSize"),  (float)s.V_size);
 
     /* FBO: off-screen rendering at exact panel resolution */
+    /* ★ 切到不用的 texture unit，避免覆蓋 unit 0~2 的綁定 ★ */
+    glActiveTexture(GL_TEXTURE7);
     glGenTextures(1, &fboTex);
     glBindTexture(GL_TEXTURE_2D, fboTex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, s.Width, s.Height, 0,
@@ -574,11 +653,19 @@ static void render_frame(int gray_level, int width, int height)
     glViewport(0, 0, width, height);
     glClear(GL_COLOR_BUFFER_BIT);
 
+    /* ★ 每次渲染前重新綁定 texture，避免被 FBO 建立時覆蓋 ★ */
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texIdxHigh);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, texIdxLow);
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, texRule);
+
     glUniform1f(glGetUniformLocation(programID, "uGrayLevel"), (float)gray_level);
 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-    /* 強制 GPU 完成 (用於精確計時) */
+    /* 強制 GPU 完成 (精確計時) */
     glFinish();
 }
 
@@ -680,11 +767,12 @@ int main(int argc, char *argv[])
 
     /* ── 初始化 EGL + OpenGL ── */
     XPodium *podium = XPodium::getHandler();
-    podium->prepareWindow(panel_w, panel_h);
+    podium->prepareWindow(1920, 1080);
     CoreEGL::initializeEGL(CoreEGL::OPENGLES2);
     eglMakeCurrent(CoreEGL::display, CoreEGL::surface,
                    CoreEGL::surface, CoreEGL::context);
     eglSwapInterval(CoreEGL::display, 0);
+    printf("EGL init OK. GL_RENDERER: %s\n", (const char*)glGetString(GL_RENDERER));
 
     /* ── 上傳 Textures ── */
     auto t2 = std::chrono::high_resolution_clock::now();
