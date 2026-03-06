@@ -1,7 +1,6 @@
 # --- Compiled Binaries & Executables ---
 # Matches the specific output from your nvcc command
-demura_video
-demura_photo
+SDKOpenGLES/YUV2RGBSample/YUV2RGBSample
 
 # Matches common C++ output patterns
 *.out
@@ -23,10 +22,15 @@ dist/
 # --- Large Media & Data Files ---
 # These are often too large for Git; consider keeping them locally
 *.mp4
+*.bmp
+*.Bmp
+*.csv
+*.CSV
 
 # --- Editor & System Files ---
 .vscode/
 .idea/
 .DS_Store
+.depend
 
 

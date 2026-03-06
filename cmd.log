@@ -3,6 +3,7 @@
 2. source ../run_exports.sh
 3. make clean
 4. make
+export DISPLAY=:1
 
 
 ./Video Supportingfiles/cat.mp4 Supportingfiles/test/W32.bmp Supportingfiles/test/W64.bmp Supportingfiles/test/W128.bmp Supportingfiles/test/W192.bmp Supportingfiles/test/W255.bmp
@@ -53,5 +54,5 @@
 ./YUV2RGBSample Supportingfiles/test/cat.mp4 Supportingfiles/1216/Correction-Gray-32.bmp Supportingfiles/1216/Correction-Gray-64.bmp Supportingfiles/1216/Correction-Gray-128.bmp Supportingfiles/1216/Correction-Gray-192.bmp Supportingfiles/1216/Correction-Gray-224.bmp
 
 // 0305
-./YUV2RGBSample SPI_DATA_0.bin result.bmp 1092 360 128
+./YUV2RGBSample SPI_DATA_0.bin 1092 360 128
 head -1 ~/Desktop/SDKOpenGLES/YUV2RGBSample/result_128_value.csv | tr ',' '\n' | head -10
