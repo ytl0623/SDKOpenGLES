@@ -8,13 +8,26 @@
 #include <chrono>
 #include <vector>
 #include <string>
+#include <signal.h>
+
+/* Terminal non-blocking keyboard input */
+#include <termios.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/select.h>
 
 #include "XLinuxPodium.h"
 #include "XGLSLCompile.h"
 #include "XEGLIntf.h"
 
 /* ═══════════════════════════════════════════════════════════════════════
- * SECTION 1: BIN 解析 (Load_From_BIN)
+ * Ctrl+C 安全停止
+ * ═══════════════════════════════════════════════════════════════════════ */
+static volatile sig_atomic_t g_running = 1;
+static void sig_handler(int) { g_running = 0; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * SECTION 1: BIN 解析
  * ═══════════════════════════════════════════════════════════════════════ */
 
 #define MAX_RULES  4096
@@ -32,11 +45,9 @@ struct DMC_State {
     float DMC_VACTIVE, DMC_PACKED_NUM, DMC_TRANS_NUM;
     int   Idx_table_W, Idx_table_H;
     float Max_rule_number;
-
     float Rule_R[MAX_RULES][7];
     float Rule_G[MAX_RULES][7];
     float Rule_B[MAX_RULES][7];
-
     float *Idx_R, *Idx_G, *Idx_B;
 };
 
@@ -156,7 +167,6 @@ static void prepare_textures(const DMC_State &s)
         idxH[i*3+2] = (b >> 8) & 0xFF;  idxL[i*3+2] = b & 0xFF;
     }
 
-    /* ★ 避免 GL_RGB row alignment 問題 ★ */
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
     auto uploadTex = [](GLuint &tex, int w, int h, const uint8_t *data) {
@@ -190,7 +200,7 @@ static void prepare_textures(const DMC_State &s)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
- * SECTION 3: Fragment Shader
+ * SECTION 3: Fragment Shader — 加入 uBypass 開關
  * ═══════════════════════════════════════════════════════════════════════ */
 
 static const char *vertSrc = R"(
@@ -213,13 +223,11 @@ uniform sampler2D uRuleTable;
 
 uniform float uLV0, uLV1, uLV2, uLV3, uLV4;
 uniform float uLV5, uLV6, uLV7, uLV8, uLV9;
-
 uniform float uCO0, uCO1, uCO2, uCO3, uCO4, uCO5, uCO6, uCO7;
 
 uniform float uOR0,uOR1,uOR2,uOR3,uOR4,uOR5,uOR6;
 uniform float uOG0,uOG1,uOG2,uOG3,uOG4,uOG5,uOG6;
 uniform float uOB0,uOB1,uOB2,uOB3,uOB4,uOB5,uOB6;
-
 uniform float uMR0,uMR1,uMR2,uMR3,uMR4,uMR5,uMR6;
 uniform float uMG0,uMG1,uMG2,uMG3,uMG4,uMG5,uMG6;
 uniform float uMB0,uMB1,uMB2,uMB3,uMB4,uMB5,uMB6;
@@ -227,81 +235,63 @@ uniform float uMB0,uMB1,uMB2,uMB3,uMB4,uMB5,uMB6;
 uniform float uIdxW, uIdxH;
 uniform float uHSize, uVSize;
 uniform float uGrayLevel;
-
-/* ★ 螢幕解析度 uniform，用來將 gl_FragCoord 映射到面板座標 ★ */
 uniform float uScreenW, uScreenH;
 uniform float uPanelW, uPanelH;
+
+/* ★ 0.0 = DMC 補償, 1.0 = 原圖 bypass ★ */
+uniform float uBypass;
 
 float hw_round(float n) {
     return (n > 0.0) ? floor(n + 0.5) : ceil(n - 0.5);
 }
 
 float getLV(float idx) {
-    if (idx < 0.5) return uLV0;
-    if (idx < 1.5) return uLV1;
-    if (idx < 2.5) return uLV2;
-    if (idx < 3.5) return uLV3;
-    if (idx < 4.5) return uLV4;
-    if (idx < 5.5) return uLV5;
-    if (idx < 6.5) return uLV6;
-    if (idx < 7.5) return uLV7;
-    if (idx < 8.5) return uLV8;
-    return uLV9;
+    if (idx < 0.5) return uLV0; if (idx < 1.5) return uLV1;
+    if (idx < 2.5) return uLV2; if (idx < 3.5) return uLV3;
+    if (idx < 4.5) return uLV4; if (idx < 5.5) return uLV5;
+    if (idx < 6.5) return uLV6; if (idx < 7.5) return uLV7;
+    if (idx < 8.5) return uLV8; return uLV9;
 }
-
 float getCOEF(float idx) {
-    if (idx < 0.5) return uCO0;
-    if (idx < 1.5) return uCO1;
-    if (idx < 2.5) return uCO2;
-    if (idx < 3.5) return uCO3;
-    if (idx < 4.5) return uCO4;
-    if (idx < 5.5) return uCO5;
-    if (idx < 6.5) return uCO6;
-    return uCO7;
+    if (idx < 0.5) return uCO0; if (idx < 1.5) return uCO1;
+    if (idx < 2.5) return uCO2; if (idx < 3.5) return uCO3;
+    if (idx < 4.5) return uCO4; if (idx < 5.5) return uCO5;
+    if (idx < 6.5) return uCO6; return uCO7;
 }
-
 float getOffset(float ch, float idx) {
     if (ch < 0.5) {
         if (idx<0.5) return uOR0; if (idx<1.5) return uOR1;
         if (idx<2.5) return uOR2; if (idx<3.5) return uOR3;
-        if (idx<4.5) return uOR4; if (idx<5.5) return uOR5;
-        return uOR6;
+        if (idx<4.5) return uOR4; if (idx<5.5) return uOR5; return uOR6;
     } else if (ch < 1.5) {
         if (idx<0.5) return uOG0; if (idx<1.5) return uOG1;
         if (idx<2.5) return uOG2; if (idx<3.5) return uOG3;
-        if (idx<4.5) return uOG4; if (idx<5.5) return uOG5;
-        return uOG6;
+        if (idx<4.5) return uOG4; if (idx<5.5) return uOG5; return uOG6;
     } else {
         if (idx<0.5) return uOB0; if (idx<1.5) return uOB1;
         if (idx<2.5) return uOB2; if (idx<3.5) return uOB3;
-        if (idx<4.5) return uOB4; if (idx<5.5) return uOB5;
-        return uOB6;
+        if (idx<4.5) return uOB4; if (idx<5.5) return uOB5; return uOB6;
     }
 }
-
 float getMag(float ch, float idx) {
     if (ch < 0.5) {
         if (idx<0.5) return uMR0; if (idx<1.5) return uMR1;
         if (idx<2.5) return uMR2; if (idx<3.5) return uMR3;
-        if (idx<4.5) return uMR4; if (idx<5.5) return uMR5;
-        return uMR6;
+        if (idx<4.5) return uMR4; if (idx<5.5) return uMR5; return uMR6;
     } else if (ch < 1.5) {
         if (idx<0.5) return uMG0; if (idx<1.5) return uMG1;
         if (idx<2.5) return uMG2; if (idx<3.5) return uMG3;
-        if (idx<4.5) return uMG4; if (idx<5.5) return uMG5;
-        return uMG6;
+        if (idx<4.5) return uMG4; if (idx<5.5) return uMG5; return uMG6;
     } else {
         if (idx<0.5) return uMB0; if (idx<1.5) return uMB1;
         if (idx<2.5) return uMB2; if (idx<3.5) return uMB3;
-        if (idx<4.5) return uMB4; if (idx<5.5) return uMB5;
-        return uMB6;
+        if (idx<4.5) return uMB4; if (idx<5.5) return uMB5; return uMB6;
     }
 }
 
 vec2 idxUV(float col, float row) {
     return vec2((col + 0.5) / uIdxW, (row + 0.5) / uIdxH);
 }
-
 float readIdx(vec2 uv, float ch) {
     vec3 hi = texture2D(uIdxHigh, uv).rgb;
     vec3 lo = texture2D(uIdxLow, uv).rgb;
@@ -311,7 +301,6 @@ float readIdx(vec2 uv, float ch) {
     else                { h = hi.b; l = lo.b; }
     return floor(h * 255.0 + 0.5) * 256.0 + floor(l * 255.0 + 0.5);
 }
-
 float readRule(float idx, float lv, float ch) {
     vec2 uv = vec2((idx + 0.5) / 4096.0, (lv + 0.5) / 7.0);
     vec3 val = texture2D(uRuleTable, uv).rgb;
@@ -321,28 +310,19 @@ float readRule(float idx, float lv, float ch) {
 }
 
 float find_plane(float pt) {
-    if (pt >  uLV9)                          return 9.0;
-    if (pt >= uLV8 && abs(uLV8 - uLV9) > 0.5) return 8.0;
-    if (pt >= uLV7)                          return 7.0;
-    if (pt >= uLV6)                          return 6.0;
-    if (pt >= uLV5)                          return 5.0;
-    if (pt >= uLV4)                          return 4.0;
-    if (pt >= uLV3)                          return 3.0;
-    if (pt >= uLV2)                          return 2.0;
-    if (pt >= uLV1)                          return 1.0;
-    return 0.0;
+    if (pt >  uLV9)                              return 9.0;
+    if (pt >= uLV8 && abs(uLV8 - uLV9) > 0.5)   return 8.0;
+    if (pt >= uLV7) return 7.0; if (pt >= uLV6) return 6.0;
+    if (pt >= uLV5) return 5.0; if (pt >= uLV4) return 4.0;
+    if (pt >= uLV3) return 3.0; if (pt >= uLV2) return 2.0;
+    if (pt >= uLV1) return 1.0; return 0.0;
 }
-
-float block_interp(float A, float B, float C, float D,
-                   float H, float V) {
-    float HAB = A + (B - A) * H;
-    HAB = hw_round(HAB * 4.0) / 4.0;
-    float HCD = C + (D - C) * H;
-    HCD = hw_round(HCD * 4.0) / 4.0;
+float block_interp(float A, float B, float C, float D, float H, float V) {
+    float HAB = A + (B - A) * H;  HAB = hw_round(HAB * 4.0) / 4.0;
+    float HCD = C + (D - C) * H;  HCD = hw_round(HCD * 4.0) / 4.0;
     float r = HAB + (HCD - HAB) * V;
     return hw_round(r * 4.0) / 4.0;
 }
-
 float mag_point(float mag, float val) {
     float d;
     if      (mag < 0.5) d = val * 4.0;
@@ -354,15 +334,13 @@ float mag_point(float mag, float val) {
     else                d = val / 16.0;
     return floor(d * 16.0) / 16.0;
 }
-
 float plane_lerp(float x, float x1, float v1, float v2, float coef) {
     float y = x - x1;
     if (y < 0.0) y = 0.0;
     y = y * coef / 262144.0;
     y = hw_round(y * 16384.0) / 16384.0;
     if (y >= 1.0) y = 1.0 - (1.0 / 16384.0);
-    float d = v2 - v1;
-    if (d < 0.0) d = 0.0;
+    float d = v2 - v1;  if (d < 0.0) d = 0.0;
     y = y * d;
     y = hw_round(y * 16.0) / 16.0;
     if (y > 1023.9375) y = 1023.9375;
@@ -374,10 +352,8 @@ float dmc_channel(float in12, float ch, float px, float py) {
     float bl = find_plane(in12);
     if (bl < 0.5 || bl > 8.5) return in12;
 
-    float HS = uHSize;
-    float VS = uVSize;
-    float bx = floor(px / HS);
-    float by = floor(py / VS);
+    float HS = uHSize, VS = uVSize;
+    float bx = floor(px / HS), by = floor(py / VS);
 
     float iA = readIdx(idxUV(bx, by), ch);
     float iB = (HS > 1.5) ? readIdx(idxUV(bx+1.0, by), ch) : 0.0;
@@ -388,56 +364,47 @@ float dmc_channel(float in12, float ch, float px, float py) {
     float Vf = mod(py, VS) / VS;
 
     float V1;
-    if (bl < 1.5) {
-        V1 = getLV(bl);
-    } else {
+    if (bl < 1.5) { V1 = getLV(bl); }
+    else {
         float lv1 = bl - 2.0;
-        float rA = readRule(iA, lv1, ch);
-        float rB = readRule(iB, lv1, ch);
-        float rC = readRule(iC, lv1, ch);
-        float rD = readRule(iD, lv1, ch);
-        float V1d = block_interp(rA, rB, rC, rD, Hf, Vf);
+        float V1d = block_interp(readRule(iA,lv1,ch), readRule(iB,lv1,ch),
+                                  readRule(iC,lv1,ch), readRule(iD,lv1,ch), Hf, Vf);
         V1 = getLV(bl) + getOffset(ch, bl - 2.0);
         if (V1 > 1023.75) V1 = 1023.75;
         V1 = mag_point(getMag(ch, bl - 2.0), V1d) + V1;
     }
-
     float V2;
-    if (bl > 7.5) {
-        V2 = getLV(bl + 1.0);
-    } else {
+    if (bl > 7.5) { V2 = getLV(bl + 1.0); }
+    else {
         float lv2 = bl - 1.0;
-        float rA = readRule(iA, lv2, ch);
-        float rB = readRule(iB, lv2, ch);
-        float rC = readRule(iC, lv2, ch);
-        float rD = readRule(iD, lv2, ch);
-        float V2d = block_interp(rA, rB, rC, rD, Hf, Vf);
+        float V2d = block_interp(readRule(iA,lv2,ch), readRule(iB,lv2,ch),
+                                  readRule(iC,lv2,ch), readRule(iD,lv2,ch), Hf, Vf);
         V2 = getLV(bl + 1.0) + getOffset(ch, bl - 1.0);
         if (V2 > 1023.75) V2 = 1023.75;
         V2 = mag_point(getMag(ch, bl - 1.0), V2d) + V2;
     }
-
-    if (V1 > 1023.9375) V1 = 1023.9375;
-    if (V1 < 0.0) V1 = 0.0;
-    if (V2 > 1023.9375) V2 = 1023.9375;
-    if (V2 < 0.0) V2 = 0.0;
-
+    V1 = clamp(V1, 0.0, 1023.9375);
+    V2 = clamp(V2, 0.0, 1023.9375);
     return plane_lerp(in12, getLV(bl), V1, V2, getCOEF(bl - 1.0));
 }
 
 void main() {
-    /* ★ 將螢幕座標映射回面板像素座標 ★ */
+    /* ★ Bypass: 直接輸出原始灰階 ★ */
+    if (uBypass > 0.5) {
+        float c = clamp(uGrayLevel / 255.0, 0.0, 1.0);
+        gl_FragColor = vec4(c, c, c, 1.0);
+        return;
+    }
+
+    /* DMC 補償 */
     float px = floor(gl_FragCoord.x * uPanelW / uScreenW);
     float py = floor(gl_FragCoord.y * uPanelH / uScreenH);
-
-    /* 超出面板範圍的片段直接黑色 */
     if (px >= uPanelW || py >= uPanelH) {
         gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
         return;
     }
 
     float in12 = uGrayLevel * 4.0;
-
     float r = dmc_channel(in12, 0.0, px, py);
     float g = dmc_channel(in12, 1.0, px, py);
     float b = dmc_channel(in12, 2.0, px, py);
@@ -446,16 +413,16 @@ void main() {
         clamp(r / 4.0 / 255.0, 0.0, 1.0),
         clamp(g / 4.0 / 255.0, 0.0, 1.0),
         clamp(b / 4.0 / 255.0, 0.0, 1.0),
-        1.0
-    );
+        1.0);
 }
 )";
 
 /* ═══════════════════════════════════════════════════════════════════════
- * SECTION 4: OpenGL Setup — 直接輸出螢幕，不建 FBO
+ * SECTION 4: OpenGL Setup
  * ═══════════════════════════════════════════════════════════════════════ */
 
 GLuint programID;
+GLint  locBypass, locGrayLevel;
 
 static const GLfloat quadVerts[] = {-1,-1, 1,-1, -1,1, 1,1};
 static const GLfloat quadUVs[]   = { 0,0, 1,0, 0,1, 1,1};
@@ -494,7 +461,6 @@ static bool setup_gl(const DMC_State &s, int screenW, int screenH)
     }
     glUseProgram(programID);
 
-    /* Vertex attributes */
     GLint aP = glGetAttribLocation(programID, "aPosition");
     GLint aT = glGetAttribLocation(programID, "aTexCoord");
     glEnableVertexAttribArray(aP);
@@ -502,44 +468,29 @@ static bool setup_gl(const DMC_State &s, int screenW, int screenH)
     glEnableVertexAttribArray(aT);
     glVertexAttribPointer(aT, 2, GL_FLOAT, GL_FALSE, 0, quadUVs);
 
-    /* Textures → Units */
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texIdxHigh);
     glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, texIdxLow);
     glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, texRule);
-
     glUniform1i(glGetUniformLocation(programID, "uIdxHigh"),   0);
     glUniform1i(glGetUniformLocation(programID, "uIdxLow"),    1);
     glUniform1i(glGetUniformLocation(programID, "uRuleTable"), 2);
 
-    /* DMC Parameters */
     float DMC_LEVEL[10] = {
         0, s.Level_B*4.0f, s.Level_1*4.0f, s.Level_2*4.0f,
         s.Level_3*4.0f, s.Level_4*4.0f, s.Level_5*4.0f,
         s.Level_6*4.0f, s.Level_7*4.0f, s.Level_W*4.0f+3.0f
     };
-    glUniform1f(glGetUniformLocation(programID, "uLV0"), DMC_LEVEL[0]);
-    glUniform1f(glGetUniformLocation(programID, "uLV1"), DMC_LEVEL[1]);
-    glUniform1f(glGetUniformLocation(programID, "uLV2"), DMC_LEVEL[2]);
-    glUniform1f(glGetUniformLocation(programID, "uLV3"), DMC_LEVEL[3]);
-    glUniform1f(glGetUniformLocation(programID, "uLV4"), DMC_LEVEL[4]);
-    glUniform1f(glGetUniformLocation(programID, "uLV5"), DMC_LEVEL[5]);
-    glUniform1f(glGetUniformLocation(programID, "uLV6"), DMC_LEVEL[6]);
-    glUniform1f(glGetUniformLocation(programID, "uLV7"), DMC_LEVEL[7]);
-    glUniform1f(glGetUniformLocation(programID, "uLV8"), DMC_LEVEL[8]);
-    glUniform1f(glGetUniformLocation(programID, "uLV9"), DMC_LEVEL[9]);
+    const char *lvN[] = {"uLV0","uLV1","uLV2","uLV3","uLV4","uLV5","uLV6","uLV7","uLV8","uLV9"};
+    for (int i = 0; i < 10; i++)
+        glUniform1f(glGetUniformLocation(programID, lvN[i]), DMC_LEVEL[i]);
 
-    glUniform1f(glGetUniformLocation(programID, "uCO0"), s.COEF[0]);
-    glUniform1f(glGetUniformLocation(programID, "uCO1"), s.COEF[1]);
-    glUniform1f(glGetUniformLocation(programID, "uCO2"), s.COEF[2]);
-    glUniform1f(glGetUniformLocation(programID, "uCO3"), s.COEF[3]);
-    glUniform1f(glGetUniformLocation(programID, "uCO4"), s.COEF[4]);
-    glUniform1f(glGetUniformLocation(programID, "uCO5"), s.COEF[5]);
-    glUniform1f(glGetUniformLocation(programID, "uCO6"), s.COEF[6]);
-    glUniform1f(glGetUniformLocation(programID, "uCO7"), s.COEF[7]);
+    const char *coN[] = {"uCO0","uCO1","uCO2","uCO3","uCO4","uCO5","uCO6","uCO7"};
+    for (int i = 0; i < 8; i++)
+        glUniform1f(glGetUniformLocation(programID, coN[i]), s.COEF[i]);
 
     auto decode = [](float raw) -> float {
         if (raw >= 2048)
-            return -((float)((~(unsigned)(int)raw) & 0xFFFF % 2048 + 1) / 4.0f);
+            return -((float)(((~(unsigned)(int)raw) & 0x7FF) + 1) / 4.0f);
         else
             return raw / 4.0f;
     };
@@ -549,12 +500,12 @@ static bool setup_gl(const DMC_State &s, int screenW, int screenH)
         offG[i] = decode(s.Offset_G[i]);
         offB[i] = decode(s.Offset_B[i]);
     }
-    const char *orN[] = {"uOR0","uOR1","uOR2","uOR3","uOR4","uOR5","uOR6"};
-    const char *ogN[] = {"uOG0","uOG1","uOG2","uOG3","uOG4","uOG5","uOG6"};
-    const char *obN[] = {"uOB0","uOB1","uOB2","uOB3","uOB4","uOB5","uOB6"};
-    const char *mrN[] = {"uMR0","uMR1","uMR2","uMR3","uMR4","uMR5","uMR6"};
-    const char *mgN[] = {"uMG0","uMG1","uMG2","uMG3","uMG4","uMG5","uMG6"};
-    const char *mbN[] = {"uMB0","uMB1","uMB2","uMB3","uMB4","uMB5","uMB6"};
+    const char *orN[]={"uOR0","uOR1","uOR2","uOR3","uOR4","uOR5","uOR6"};
+    const char *ogN[]={"uOG0","uOG1","uOG2","uOG3","uOG4","uOG5","uOG6"};
+    const char *obN[]={"uOB0","uOB1","uOB2","uOB3","uOB4","uOB5","uOB6"};
+    const char *mrN[]={"uMR0","uMR1","uMR2","uMR3","uMR4","uMR5","uMR6"};
+    const char *mgN[]={"uMG0","uMG1","uMG2","uMG3","uMG4","uMG5","uMG6"};
+    const char *mbN[]={"uMB0","uMB1","uMB2","uMB3","uMB4","uMB5","uMB6"};
     for (int i = 0; i < 7; i++) {
         glUniform1f(glGetUniformLocation(programID, orN[i]), offR[i]);
         glUniform1f(glGetUniformLocation(programID, ogN[i]), offG[i]);
@@ -578,14 +529,16 @@ static bool setup_gl(const DMC_State &s, int screenW, int screenH)
     glUniform1f(glGetUniformLocation(programID, "uIdxH"),   (float)s.Idx_table_H);
     glUniform1f(glGetUniformLocation(programID, "uHSize"),  (float)s.H_size);
     glUniform1f(glGetUniformLocation(programID, "uVSize"),  (float)s.V_size);
-
-    /* ★ 螢幕 / 面板尺寸 uniform ★ */
     glUniform1f(glGetUniformLocation(programID, "uScreenW"), (float)screenW);
     glUniform1f(glGetUniformLocation(programID, "uScreenH"), (float)screenH);
     glUniform1f(glGetUniformLocation(programID, "uPanelW"),  (float)s.Width);
     glUniform1f(glGetUniformLocation(programID, "uPanelH"),  (float)s.Height);
 
-    /* ★ 不建 FBO — 直接用 default framebuffer ★ */
+    /* cache 頻繁切換的 uniform location */
+    locBypass    = glGetUniformLocation(programID, "uBypass");
+    locGrayLevel = glGetUniformLocation(programID, "uGrayLevel");
+    glUniform1f(locBypass, 0.0f);
+
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glDisable(GL_DEPTH_TEST);
     printf("OpenGL setup OK (direct display mode).\n");
@@ -593,92 +546,89 @@ static bool setup_gl(const DMC_State &s, int screenW, int screenH)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
- * SECTION 5: 直接渲染到螢幕 + eglSwapBuffers
+ * SECTION 5: Render
  * ═══════════════════════════════════════════════════════════════════════ */
 
-static void render_to_screen(int gray_level, int screenW, int screenH)
+static void render_to_screen(int gray_level, bool bypass, int screenW, int screenH)
 {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, screenW, screenH);
-    /* ★ 不做 glClear — 全螢幕 quad 會覆蓋所有像素，省一次 bandwidth ★ */
 
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texIdxHigh);
     glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, texIdxLow);
     glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, texRule);
 
-    glUniform1f(glGetUniformLocation(programID, "uGrayLevel"), (float)gray_level);
+    glUniform1f(locGrayLevel, (float)gray_level);
+    glUniform1f(locBypass,    bypass ? 1.0f : 0.0f);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
- * SECTION 6: save_bmp / save_csv (已註解)
+ * SECTION 6: save_bmp / save_csv (已停用)
  * ═══════════════════════════════════════════════════════════════════════ */
-
-#if 0  /* ── 已停用：不再做 readback + 檔案寫出 ── */
-
-#pragma pack(push, 1)
-struct BmpFH { uint16_t t; uint32_t sz; uint16_t r1,r2; uint32_t off; };
-struct BmpIH { uint32_t sz; int32_t w,h; uint16_t pl,bp;
-               uint32_t co,is; int32_t xr,yr; uint32_t cu,ci; };
-#pragma pack(pop)
-
-static void save_bmp(const char *path, int w, int h, const uint8_t *rgba)
-{
-    int stride = (w * 3 + 3) & ~3;
-    int imgSz = stride * h;
-    BmpFH fh = {}; fh.t = 0x4D42;
-    fh.off = sizeof(BmpFH) + sizeof(BmpIH);
-    fh.sz = fh.off + imgSz;
-    BmpIH ih = {}; ih.sz = sizeof(BmpIH);
-    ih.w = w; ih.h = h; ih.pl = 1; ih.bp = 24; ih.is = imgSz;
-    FILE *f = fopen(path, "wb");
-    if (!f) { perror(path); return; }
-    fwrite(&fh, sizeof(fh), 1, f);
-    fwrite(&ih, sizeof(ih), 1, f);
-    std::vector<uint8_t> row(stride, 0);
-    for (int y = h - 1; y >= 0; y--) {
-        memset(row.data(), 0, stride);
-        for (int x = 0; x < w; x++) {
-            int si = (y * w + x) * 4;
-            row[x*3+0] = rgba[si+2];
-            row[x*3+1] = rgba[si+1];
-            row[x*3+2] = rgba[si+0];
-        }
-        fwrite(row.data(), 1, stride, f);
-    }
-    fclose(f);
-    printf("Saved: %s\n", path);
-}
-
-static void save_csv(const char *path, int w, int h, const uint8_t *rgba)
-{
-    FILE *f = fopen(path, "w");
-    if (!f) return;
-    for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x++) {
-            int i = (y * w + x) * 4;
-            fprintf(f, "%d,%d,%d,",
-                    (int)rgba[i+0] * 4,
-                    (int)rgba[i+1] * 4,
-                    (int)rgba[i+2] * 4);
-        }
-        fprintf(f, "\n");
-    }
-    fclose(f);
-    printf("Saved: %s\n", path);
-}
-
-#endif /* save_bmp / save_csv 已停用 */
+#if 0
+/* ... 略 ... */
+#endif
 
 /* ═══════════════════════════════════════════════════════════════════════
- * SECTION 7: main — 連續渲染迴圈 + FPS 計算
+ * SECTION 7: Terminal 非阻塞鍵盤輸入
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+static struct termios g_orig_termios;
+static bool g_termios_saved = false;
+
+static void init_terminal_input()
+{
+    /* 儲存原始終端設定 */
+    tcgetattr(STDIN_FILENO, &g_orig_termios);
+    g_termios_saved = true;
+
+    /* 設定 raw mode: 不等 Enter、不回顯 */
+    struct termios raw = g_orig_termios;
+    raw.c_lflag &= ~(ICANON | ECHO);
+    raw.c_cc[VMIN]  = 0;   /* non-blocking */
+    raw.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+
+    /* stdin 設為非阻塞 */
+    int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+
+    printf("Terminal keyboard input ready.\n");
+}
+
+static void cleanup_terminal_input()
+{
+    if (g_termios_saved) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &g_orig_termios);
+    }
+}
+
+enum KeyAction { KEY_NONE, KEY_SPACE, KEY_ESC };
+
+static KeyAction poll_key()
+{
+    KeyAction action = KEY_NONE;
+    char c;
+    /* 一次讀完所有 pending 的按鍵，只取最後一個有效動作 */
+    while (read(STDIN_FILENO, &c, 1) == 1) {
+        if (c == ' ')       action = KEY_SPACE;
+        else if (c == 27)   action = KEY_ESC;   /* ESC = 0x1B */
+        else if (c == 'q' || c == 'Q') action = KEY_ESC;
+    }
+    return action;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * SECTION 8: main — 永久迴圈 + 空白鍵切換 + CPU/GPU 計時
  * ═══════════════════════════════════════════════════════════════════════ */
 
 int main(int argc, char *argv[])
 {
     if (argc < 5) {
-        printf("Usage: %s <input.bin> <width> <height> <gray_level> [duration_sec]\n", argv[0]);
-        printf("  duration_sec: how long to run (default=10, 0=infinite)\n");
+        printf("Usage: %s <input.bin> <width> <height> <gray_level>\n", argv[0]);
+        printf("  [SPACE] Toggle DMC / Original\n");
+        printf("  [ESC]   or [Q] or Ctrl+C to quit\n");
         return 1;
     }
 
@@ -686,7 +636,10 @@ int main(int argc, char *argv[])
     int panel_w = atoi(argv[2]);
     int panel_h = atoi(argv[3]);
     int gray_lv = atoi(argv[4]);
-    int duration = (argc >= 6) ? atoi(argv[5]) : 10;
+
+    /* Ctrl+C handler */
+    signal(SIGINT,  sig_handler);
+    signal(SIGTERM, sig_handler);
 
     /* ── 讀取 BIN ── */
     FILE *fb = fopen(bin_path, "rb");
@@ -705,105 +658,143 @@ int main(int argc, char *argv[])
         free(bin); return 1;
     }
     auto t1 = std::chrono::high_resolution_clock::now();
-    double ms_load = std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count()/1000.0;
-    printf("Load_From_BIN: %.1f ms\n", ms_load);
+    printf("Load_From_BIN: %.1f ms\n",
+           std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count()/1000.0);
     free(bin);
 
-    /* ── 初始化 EGL (視窗 = 螢幕解析度) ── */
+    /* ── EGL ── */
     int screenW = 1920, screenH = 1080;
     XPodium *podium = XPodium::getHandler();
     podium->prepareWindow(screenW, screenH);
     CoreEGL::initializeEGL(CoreEGL::OPENGLES2);
     eglMakeCurrent(CoreEGL::display, CoreEGL::surface,
                    CoreEGL::surface, CoreEGL::context);
-
-    /* ★ swap interval = 0: 不等 VSync，全速跑 ★ */
     eglSwapInterval(CoreEGL::display, 0);
     printf("EGL init OK. GL_RENDERER: %s\n", (const char*)glGetString(GL_RENDERER));
 
-    /* ── 上傳 Textures ── */
+    /* ── Terminal keyboard ── */
+    init_terminal_input();
+
+    /* ── Textures ── */
     auto t2 = std::chrono::high_resolution_clock::now();
     prepare_textures(st);
     auto t3 = std::chrono::high_resolution_clock::now();
-    double ms_tex = std::chrono::duration_cast<std::chrono::microseconds>(t3-t2).count()/1000.0;
-    printf("Texture upload: %.1f ms\n", ms_tex);
+    printf("Texture upload: %.1f ms\n",
+           std::chrono::duration_cast<std::chrono::microseconds>(t3-t2).count()/1000.0);
 
-    /* ── 編譯 Shader & 設定 Uniforms ── */
+    /* ── Shader & Uniforms ── */
     if (!setup_gl(st, screenW, screenH)) return 1;
 
     /* ══════════════════════════════════════════════════════════════════
-     * 連續渲染迴圈：直接 swap 到螢幕，計算即時 FPS
+     * 主迴圈
      * ══════════════════════════════════════════════════════════════════ */
     printf("\n========================================\n");
-    printf("Display mode: %dx%d screen, panel %dx%d, gray=%d\n",
-           screenW, screenH, panel_w, panel_h, gray_lv);
-    if (duration > 0)
-        printf("Running for %d seconds...\n", duration);
-    else
-        printf("Running until killed (Ctrl+C)...\n");
+    printf("Panel %dx%d  Gray=%d\n", panel_w, panel_h, gray_lv);
+    printf("[SPACE] Toggle DMC <-> Original\n");
+    printf("[ESC] or [Q] or Ctrl+C to quit\n");
     printf("========================================\n\n");
 
-    long frame_count = 0;
-    auto t_start  = std::chrono::high_resolution_clock::now();
-    auto t_report = t_start;    /* 上次印出 FPS 的時間 */
+    bool dmc_on = true;
+    long total_frames = 0;
+    long dmc_frames = 0, raw_frames = 0;
+    double dmc_gpu_total_us = 0, raw_gpu_total_us = 0;
+    double dmc_cpu_total_us = 0, raw_cpu_total_us = 0;
 
-    bool running = true;
-    while (running) {
-        /* ── GPU render → screen ── */
-        render_to_screen(gray_lv, screenW, screenH);
+    auto t_loop = std::chrono::high_resolution_clock::now();
+    auto t_report = t_loop;
+    long frames_interval = 0;
 
-        /* ── swap buffers (呈現到螢幕) ── */
-        eglSwapBuffers(CoreEGL::display, CoreEGL::surface);
-
-        frame_count++;
-
-        /* ── 每秒印出一次 FPS ── */
-        auto t_now = std::chrono::high_resolution_clock::now();
-        double sec_since_report = std::chrono::duration_cast<std::chrono::microseconds>(
-            t_now - t_report).count() / 1e6;
-
-        if (sec_since_report >= 1.0) {
-            double fps = frame_count / (std::chrono::duration_cast<std::chrono::microseconds>(
-                t_now - t_start).count() / 1e6);
-            double instant_fps = 1.0 / sec_since_report * (frame_count -
-                (long)(fps * std::chrono::duration_cast<std::chrono::microseconds>(
-                    t_report - t_start).count() / 1e6));
-
-            printf("[Frame %6ld]  Avg FPS: %7.1f  |  Last interval: %.1f FPS  |  "
-                   "Frame time: %.3f ms\n",
-                   frame_count, fps,
-                   /* instant: 本次區間的 frames / sec_since_report */
-                   (double)(frame_count) / (std::chrono::duration_cast<std::chrono::microseconds>(
-                       t_now - t_start).count() / 1e6),
-                   1000.0 / fps);
-
-            t_report = t_now;
+    while (g_running) {
+        /* ── 鍵盤 ── */
+        KeyAction key = poll_key();
+        if (key == KEY_ESC) break;
+        if (key == KEY_SPACE) {
+            dmc_on = !dmc_on;
+            printf(">>> Mode: %s\n", dmc_on ? "DMC Compensated" : "Original (bypass)");
         }
 
-        /* ── 時間到就結束 ── */
-        if (duration > 0) {
-            double elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                t_now - t_start).count() / 1e6;
-            if (elapsed >= (double)duration) running = false;
+        /* ── CPU: 送出 draw command ── */
+        auto tA = std::chrono::high_resolution_clock::now();
+        render_to_screen(gray_lv, !dmc_on, screenW, screenH);
+        auto tB = std::chrono::high_resolution_clock::now();
+
+        /* ── GPU: 等 GPU 完成 ── */
+        glFinish();
+        auto tC = std::chrono::high_resolution_clock::now();
+
+        double cpu_us = std::chrono::duration_cast<std::chrono::nanoseconds>(tB - tA).count() / 1000.0;
+        double gpu_us = std::chrono::duration_cast<std::chrono::nanoseconds>(tC - tB).count() / 1000.0;
+
+        if (dmc_on) {
+            dmc_cpu_total_us += cpu_us;
+            dmc_gpu_total_us += gpu_us;
+            dmc_frames++;
+        } else {
+            raw_cpu_total_us += cpu_us;
+            raw_gpu_total_us += gpu_us;
+            raw_frames++;
+        }
+
+        /* ── Swap ── */
+        eglSwapBuffers(CoreEGL::display, CoreEGL::surface);
+        total_frames++;
+        frames_interval++;
+
+        /* ── 每秒印 FPS ── */
+        auto tNow = std::chrono::high_resolution_clock::now();
+        double sec = std::chrono::duration_cast<std::chrono::microseconds>(
+            tNow - t_report).count() / 1e6;
+
+        if (sec >= 1.0) {
+            double fps = frames_interval / sec;
+            printf("[%s] Frame %ld | FPS: %.1f | CPU: %.3f ms | GPU: %.3f ms | Total: %.3f ms\n",
+                   dmc_on ? "DMC" : "RAW",
+                   total_frames, fps,
+                   cpu_us / 1000.0, gpu_us / 1000.0,
+                   (cpu_us + gpu_us) / 1000.0);
+            t_report = tNow;
+            frames_interval = 0;
         }
     }
 
-    /* ── 最終統計 ── */
+    /* ══════════════════════════════════════════════════════════════════
+     * 最終統計
+     * ══════════════════════════════════════════════════════════════════ */
     auto t_end = std::chrono::high_resolution_clock::now();
     double total_sec = std::chrono::duration_cast<std::chrono::microseconds>(
-        t_end - t_start).count() / 1e6;
-    double avg_fps = frame_count / total_sec;
-    double avg_ms  = total_sec / frame_count * 1000.0;
+        t_end - t_loop).count() / 1e6;
 
-    printf("\n========================================\n");
-    printf("RESULT: %ld frames in %.2f sec\n", frame_count, total_sec);
-    printf("  Average FPS      : %.1f\n", avg_fps);
-    printf("  Average frame time: %.3f ms\n", avg_ms);
-    printf("  Min frame time   : %.3f ms (theoretical @ %.1f FPS)\n",
-           avg_ms, avg_fps);
-    printf("========================================\n");
+    printf("\n════════════════════════════════════════\n");
+    printf("         PERFORMANCE SUMMARY\n");
+    printf("════════════════════════════════════════\n");
+    printf("Total: %ld frames in %.2f sec (%.1f FPS avg)\n\n",
+           total_frames, total_sec, total_frames / total_sec);
+
+    if (dmc_frames > 0) {
+        double ac = dmc_cpu_total_us / dmc_frames / 1000.0;
+        double ag = dmc_gpu_total_us / dmc_frames / 1000.0;
+        printf("  [DMC Compensated]  %ld frames\n", dmc_frames);
+        printf("    Avg CPU time : %7.3f ms\n", ac);
+        printf("    Avg GPU time : %7.3f ms\n", ag);
+        printf("    Avg Total    : %7.3f ms  (%.1f FPS)\n", ac+ag, 1000.0/(ac+ag));
+    }
+    if (raw_frames > 0) {
+        double ac = raw_cpu_total_us / raw_frames / 1000.0;
+        double ag = raw_gpu_total_us / raw_frames / 1000.0;
+        printf("  [Original bypass]  %ld frames\n", raw_frames);
+        printf("    Avg CPU time : %7.3f ms\n", ac);
+        printf("    Avg GPU time : %7.3f ms\n", ag);
+        printf("    Avg Total    : %7.3f ms  (%.1f FPS)\n", ac+ag, 1000.0/(ac+ag));
+    }
+    if (dmc_frames > 0 && raw_frames > 0) {
+        double dt = (dmc_cpu_total_us + dmc_gpu_total_us) / dmc_frames;
+        double rt = (raw_cpu_total_us + raw_gpu_total_us) / raw_frames;
+        printf("\n  DMC overhead vs Original: %.2fx\n", dt / rt);
+    }
+    printf("════════════════════════════════════════\n");
 
     /* ── 清理 ── */
+    cleanup_terminal_input();
     glDeleteTextures(1, &texIdxHigh);
     glDeleteTextures(1, &texIdxLow);
     glDeleteTextures(1, &texRule);
