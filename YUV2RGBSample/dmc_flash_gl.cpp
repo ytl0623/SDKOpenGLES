@@ -1,10 +1,6 @@
 /*
  * Build:
- *   g++ -o dmc_flash_gl dmc_flash_gl.cpp \
- *       -L. -lft4222 -lftd2xx \
- *       -lGLESv2 -lEGL \
- *       -lpthread -lrt -ldl \
- *       -Wl,-rpath,.
+ *   g++ -o dmc_flash_gl dmc_flash_gl.cpp -L. -lft4222 -lftd2xx -lGLESv2 -lEGL -lpthread -lrt -ldl -Wl,-rpath,.
  *
  * Run:
  *   sudo ./dmc_flash_gl <width> <height> <gray_level> [output.bin]

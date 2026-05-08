@@ -3,8 +3,8 @@
 # export TOP_DIR =$(shell pwd)
 # export ARCH = arm64
 # export OUTPUT_DIR =$(TOP_DIR)/../bin
-LD_FLAGS= -lm -lpthread -ldl -lX11 -lxcb -lXau -lXdmcp -ldrm -lXfixes -lXext -lXdamage -lexpat -lEGL -lGLESv2 -lavformat -lavcodec -lavutil -lswscale
-LIB=-L$(MALI_LIBS)
+LD_FLAGS= -lm -lpthread -ldl -lX11 -lxcb -lXau -lXdmcp -ldrm -lXfixes -lXext -lXdamage -lexpat -lEGL -lGLESv2 -lavformat -lavcodec -lavutil -lswscale -lft4222 -lftd2xx
+LIB=-L$(MALI_LIBS) -L.
 INC=-I$(MALI_INCLUDE) -I$(DRM_INCLUDE)
 PROJ_INCLUDES=-I../Coreframework
 

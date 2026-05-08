@@ -56,3 +56,8 @@
 // 0305
 ./YUV2RGBSample SPI_DATA_0.bin 1092 360 128
 head -1 ~/Desktop/SDKOpenGLES/YUV2RGBSample/result_128_value.csv | tr ',' '\n' | head -10
+
+// 0407 dmc+flash
+sudo cp /home/auo/Desktop/ken/one_SPI/libft4222.so /usr/lib/
+sudo cp /home/auo/Desktop/ken/one_SPI/libftd2xx.so /usr/lib/
+sudo ./YUV2RGBSample 1092 360 128
